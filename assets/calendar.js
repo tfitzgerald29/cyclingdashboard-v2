@@ -218,9 +218,12 @@
 
     var events = [];
     var raw = [];
+    var initialDate = null;
     try {
       events = JSON.parse(eventsEl.textContent);
       raw = JSON.parse(rawEl.textContent);
+      var initEl = document.getElementById("fc-initial-date");
+      if (initEl) initialDate = JSON.parse(initEl.textContent);
     } catch (e) {
       return;
     }
@@ -230,7 +233,7 @@
       window._fcCalendar = null;
     }
 
-    window._fcCalendar = new FullCalendar.Calendar(el, {
+    var calOpts = {
       initialView: "dayGridMonth",
       fixedWeekCount: false,
       showNonCurrentDates: false,
@@ -249,8 +252,10 @@
         window._fcCurrentMonth = info.view.currentStart.toISOString().slice(0, 10);
         setTimeout(function () { injectSummaryRows(raw); }, 0);
       },
-    });
+    };
+    if (initialDate) calOpts.initialDate = initialDate;
 
+    window._fcCalendar = new FullCalendar.Calendar(el, calOpts);
     window._fcCalendar.render();
   }
 

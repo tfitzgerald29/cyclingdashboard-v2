@@ -139,10 +139,14 @@ def _load_events():
 def calendar_tab():
     events, raw = _load_events()
 
+    # Find the latest event date so the calendar opens to the right month
+    latest_date = max((e["start"] for e in events), default=None) if events else None
+
     return html.Div([
         # Data for JS to read
         html.Script(id="fc-events-data", type="application/json", children=json.dumps(events)),
         html.Script(id="fc-raw-data", type="application/json", children=json.dumps(raw)),
+        html.Script(id="fc-initial-date", type="application/json", children=json.dumps(latest_date)),
         html.Div(
             style={**CARD_STYLE},
             children=[
