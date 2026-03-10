@@ -53,7 +53,10 @@ class FitFileProcessor:
                                         self.processedpath, fit_filename
                                     )
 
-                                    # Extract and save to target path
+                                    # Skip if already extracted
+                                    if os.path.exists(target_path):
+                                        continue
+
                                     with (
                                         zip_ref.open(file_info.filename) as source,
                                         open(target_path, "wb") as target,
@@ -62,6 +65,10 @@ class FitFileProcessor:
 
                                     new_fit_files.append(target_path)
                                     print(f"  Extracted: {fit_filename}")
+
+                        # Delete the zip after successful extraction
+                        os.remove(entry.path)
+                        print(f"  Deleted: {entry.name}")
 
                     except Exception as e:
                         print(f"  Error unzipping {entry.name}: {e}")

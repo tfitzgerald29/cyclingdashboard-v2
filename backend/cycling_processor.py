@@ -23,8 +23,6 @@ class CyclingProcessor(
 
     def __init__(self, source_folder=None, processedpath=None, mergedfiles_path=None):
         super().__init__(source_folder, processedpath, mergedfiles_path)
-        if os.path.isdir(self.source_folder):
-            self.run()
         self.cycling = self._load_cycling_sessions()
         self._update_power_curve_cache()
 
