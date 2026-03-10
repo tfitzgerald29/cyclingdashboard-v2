@@ -25,6 +25,7 @@ class CyclingProcessor(
         super().__init__(source_folder, processedpath, mergedfiles_path)
         self.cycling = self._load_cycling_sessions()
         self._update_power_curve_cache()
+        self._update_bootstrap_cache()
 
     # ── Data loading ──────────────────────────────────────────────────────
 
@@ -107,6 +108,20 @@ class CyclingProcessor(
 
         new_cache.write_parquet(cache_path)
         print(f"  Power curve cache: added {len(rows)} rides (total: {len(new_cache)})")
+
+    def _update_bootstrap_cache(self):
+        """Refresh the CP covariate bootstrap cache if data has changed."""
+        boot_path = os.path.join(
+            self.mergedfiles_path, "cp_covariate_bootstrap.json"
+        )
+        curves_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
+        # Re-run bootstrap if cache is missing or older than power curves
+        if os.path.exists(curves_path) and (
+            not os.path.exists(boot_path)
+            or os.path.getmtime(boot_path) < os.path.getmtime(curves_path)
+        ):
+            print("  Refreshing CP covariate bootstrap cache...")
+            self.refresh_cp_covariate_bootstrap()
 
     # ── Ride listing & summary ────────────────────────────────────────────
 

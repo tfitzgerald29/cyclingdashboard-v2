@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import date, timedelta
 
@@ -341,29 +342,59 @@ class CpModelMixin:
 
         formula_rhs = " + ".join(usable)
 
+        # Load cached bootstrap results if available
+        boot_cache_path = os.path.join(
+            self.mergedfiles_path, "cp_covariate_bootstrap.json"
+        )
+        boot_cache = {}
+        if os.path.exists(boot_cache_path):
+            with open(boot_cache_path) as f:
+                boot_cache = json.load(f)
+
         def _fit_ols(dep_col, pdf):
             formula = f"{dep_col} ~ {formula_rhs}"
             model = smf.ols(formula, data=pdf).fit(
                 cov_type="HAC", cov_kwds={"maxlags": 3}
             )
+            param_names = list(model.params.index)
+
+            # Use bootstrap CIs from cache if available
+            boot_result = boot_cache.get(dep_col)
+
             coefs = []
-            for name in model.params.index:
-                coefs.append(
-                    {
-                        "name": "const" if name == "Intercept" else name,
-                        "coef": round(float(model.params[name]), 4),
-                        "pvalue": round(float(model.pvalues[name]), 4),
-                        "ci_low": round(float(model.conf_int().loc[name][0]), 4),
-                        "ci_high": round(float(model.conf_int().loc[name][1]), 4),
-                    }
-                )
-            return {
+            for name in param_names:
+                point = float(model.params[name])
+                entry = {
+                    "name": "const" if name == "Intercept" else name,
+                    "coef": round(point, 4),
+                    "pvalue": round(float(model.pvalues[name]), 4),
+                    "ci_low": round(float(model.conf_int().loc[name][0]), 4),
+                    "ci_high": round(float(model.conf_int().loc[name][1]), 4),
+                }
+                # Overlay bootstrap results if cached
+                if boot_result:
+                    key = "const" if name == "Intercept" else name
+                    for bc in boot_result["coefficients"]:
+                        if bc["name"] == key:
+                            entry["pvalue_boot"] = bc["pvalue_boot"]
+                            entry["ci_low"] = bc["ci_low"]
+                            entry["ci_high"] = bc["ci_high"]
+                            entry["coef_median"] = bc["coef_median"]
+                            entry["coef_mean"] = bc["coef_mean"]
+                            entry["ci_method"] = "bootstrap"
+                            break
+                coefs.append(entry)
+
+            result = {
                 "r2": round(float(model.rsquared), 3),
                 "r2_adj": round(float(model.rsquared_adj), 3),
                 "f_pvalue": round(float(model.f_pvalue), 4),
                 "n": int(model.nobs),
                 "coefficients": coefs,
             }
+            if boot_result:
+                result["n_bootstrap"] = boot_result.get("n_bootstrap", 0)
+            return result
 
         # Fit a model for each duration
         models = {}
@@ -396,3 +427,163 @@ class CpModelMixin:
                 "values": corr_matrix.values.tolist(),
             },
         }
+
+    def refresh_cp_covariate_bootstrap(self, n_bootstrap: int = 5000) -> None:
+        """Run bootstrap resampling for CP covariate models and cache results.
+
+        Call this after new data is loaded. The dashboard reads from the
+        cached JSON so it doesn't have to wait for the bootstrap to run.
+        """
+        cache_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
+        if not os.path.exists(cache_path):
+            return
+
+        ctl_atl = self.compute_ctl_atl()
+        df = self.cycling.clone()
+        if df.is_empty():
+            return
+
+        ts_col = "timestamp"
+        if df[ts_col].dtype.time_zone is None:
+            df = df.with_columns(pl.col(ts_col).dt.replace_time_zone("UTC"))
+        df = df.with_columns(
+            pl.col(ts_col).dt.convert_time_zone("America/Denver"),
+        )
+
+        curves = pl.read_parquet(cache_path)
+        dur_cols = {
+            f"d_{d}": label for d, label in self.PEAK_REGRESSION_DURATIONS.items()
+        }
+        available_dur_cols = {
+            c: la for c, la in dur_cols.items() if c in curves.columns
+        }
+        if not available_dur_cols:
+            return
+
+        rides = (
+            df.select("source_file", ts_col)
+            .join(
+                curves.select(["source_file"] + list(available_dur_cols.keys())),
+                on="source_file",
+                how="inner",
+            )
+            .with_columns(
+                pl.col(ts_col).dt.truncate("1mo").dt.date().alias("month"),
+            )
+        )
+
+        monthly_peaks = rides.group_by("month").agg(
+            [pl.col(c).max().alias(c) for c in available_dur_cols]
+        )
+
+        monthly_ctl = (
+            ctl_atl.filter(~pl.col("is_projection"))
+            .with_columns(pl.col("date").dt.truncate("1mo").alias("month"))
+            .group_by("month")
+            .agg(pl.col("ctl").last().alias("ctl"))
+        )
+
+        combined = monthly_peaks.join(monthly_ctl, on="month", how="left").sort("month")
+        combined = combined.with_columns(
+            pl.col("ctl").shift(3).alias("ctl_lag3"),
+        )
+        combined = combined.with_columns(
+            pl.col("month").dt.month().alias("mo_num"),
+        )
+        combined = combined.with_columns(
+            pl.when(pl.col("mo_num").is_in([3, 4, 5]))
+            .then(1)
+            .otherwise(0)
+            .alias("spring"),
+            pl.when(pl.col("mo_num").is_in([6, 7, 8]))
+            .then(1)
+            .otherwise(0)
+            .alias("summer"),
+            pl.when(pl.col("mo_num").is_in([9, 10, 11]))
+            .then(1)
+            .otherwise(0)
+            .alias("fall"),
+        ).drop("mo_num")
+
+        combined = combined.drop_nulls()
+        if len(combined) < 5:
+            return
+
+        covariate_names = ["ctl_lag3", "spring", "summer", "fall"]
+        usable = []
+        for c in covariate_names:
+            col = combined[c].drop_nulls()
+            if len(col) == len(combined) and col.std() > 0:
+                usable.append(c)
+        if len(usable) < 1:
+            return
+
+        pdf = combined.select(
+            ["month"] + list(available_dur_cols.keys()) + usable
+        ).to_pandas()
+
+        formula_rhs = " + ".join(usable)
+        cov_cols = usable
+        n = len(pdf)
+        rng = np.random.default_rng(42)
+
+        boot_cache = {}
+        for dep_col in available_dur_cols:
+            formula = f"{dep_col} ~ {formula_rhs}"
+            model = smf.ols(formula, data=pdf).fit()
+            param_names = list(model.params.index)
+            n_params = len(param_names)
+
+            # Build design matrix once for fast numpy bootstrap
+            y_full = pdf[dep_col].values.astype(float)
+            X_full = np.column_stack(
+                [np.ones(n)] + [pdf[c].values.astype(float) for c in cov_cols]
+            )
+
+            boot_coefs = np.empty((n_bootstrap, n_params))
+            for b in range(n_bootstrap):
+                idx = rng.integers(0, n, size=n)
+                try:
+                    boot_coefs[b] = np.linalg.lstsq(
+                        X_full[idx], y_full[idx], rcond=None
+                    )[0]
+                except np.linalg.LinAlgError:
+                    boot_coefs[b] = np.nan
+
+            valid = ~np.isnan(boot_coefs).any(axis=1)
+            boot_coefs = boot_coefs[valid]
+
+            coefs = []
+            for i, name in enumerate(param_names):
+                boot_dist = boot_coefs[:, i]
+                ci_low, ci_high = float(np.percentile(boot_dist, 2.5)), float(
+                    np.percentile(boot_dist, 97.5)
+                )
+                point = float(model.params[name])
+                if point >= 0:
+                    p_boot = 2 * float(np.mean(boot_dist <= 0))
+                else:
+                    p_boot = 2 * float(np.mean(boot_dist >= 0))
+                p_boot = min(p_boot, 1.0)
+
+                coefs.append(
+                    {
+                        "name": "const" if name == "Intercept" else name,
+                        "coef_median": round(float(np.median(boot_dist)), 4),
+                        "coef_mean": round(float(np.mean(boot_dist)), 4),
+                        "pvalue_boot": round(p_boot, 4),
+                        "ci_low": round(ci_low, 4),
+                        "ci_high": round(ci_high, 4),
+                    }
+                )
+
+            boot_cache[dep_col] = {
+                "n_bootstrap": int(np.sum(valid)),
+                "coefficients": coefs,
+            }
+
+        out_path = os.path.join(
+            self.mergedfiles_path, "cp_covariate_bootstrap.json"
+        )
+        with open(out_path, "w") as f:
+            json.dump(boot_cache, f, indent=2)

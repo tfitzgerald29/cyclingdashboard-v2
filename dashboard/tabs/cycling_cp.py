@@ -389,14 +389,16 @@ def update_cp_covariates(period):
         return html.Div(), empty_fig
 
     def _build_table(model_result, dep_var):
+        cell_style = {"textAlign": "right", "padding": "4px 8px"}
         header = html.Tr(
             [
                 html.Th(
-                    "Covariate", style={"textAlign": "left", "padding": "4px 12px"}
+                    "Covariate", style={"textAlign": "left", "padding": "4px 8px"}
                 ),
-                html.Th("Coeff", style={"textAlign": "right", "padding": "4px 12px"}),
-                html.Th("95% CI", style={"textAlign": "right", "padding": "4px 12px"}),
-                html.Th("p-value", style={"textAlign": "right", "padding": "4px 12px"}),
+                html.Th("OLS", style=cell_style),
+                html.Th("Median", style=cell_style),
+                html.Th("Mean", style=cell_style),
+                html.Th("95% CI (boot)", style=cell_style),
             ]
         )
         rows = []
@@ -404,40 +406,44 @@ def update_cp_covariates(period):
             label = COVARIATE_LABELS.get(c["name"], c["name"])
             if c["name"] == "const":
                 label = "Intercept (Winter baseline)"
-            sig = "*" if c["pvalue"] < 0.05 else ""
-            p_color = COLORS["accent"] if c["pvalue"] < 0.05 else COLORS["muted"]
+            median_val = c.get("coef_median")
+            mean_val = c.get("coef_mean")
+            # CI crosses zero = not significant
+            ci_low = c["ci_low"]
+            ci_high = c["ci_high"]
+            crosses_zero = ci_low <= 0 <= ci_high
+            sig_color = COLORS["muted"] if crosses_zero else COLORS["accent"]
             rows.append(
                 html.Tr(
                     [
-                        html.Td(label, style={"padding": "4px 12px"}),
+                        html.Td(label, style={"padding": "4px 8px"}),
+                        html.Td(f"{c['coef']:.1f}", style=cell_style),
                         html.Td(
-                            f"{c['coef']:.1f}",
-                            style={"textAlign": "right", "padding": "4px 12px"},
+                            f"{median_val:.1f}" if median_val is not None else "-",
+                            style=cell_style,
                         ),
                         html.Td(
-                            f"[{c['ci_low']:.1f}, {c['ci_high']:.1f}]",
+                            f"{mean_val:.1f}" if mean_val is not None else "-",
+                            style=cell_style,
+                        ),
+                        html.Td(
+                            f"[{ci_low:.1f}, {ci_high:.1f}]",
                             style={
-                                "textAlign": "right",
-                                "padding": "4px 12px",
+                                **cell_style,
                                 "fontSize": "0.8rem",
-                            },
-                        ),
-                        html.Td(
-                            f"{c['pvalue']:.3f}{sig}",
-                            style={
-                                "textAlign": "right",
-                                "padding": "4px 12px",
-                                "color": p_color,
+                                "color": sig_color,
                             },
                         ),
                     ]
                 )
             )
 
+        n_boot = model_result.get("n_bootstrap", "")
+        boot_label = f"  boot={n_boot}" if n_boot else ""
         r2_text = (
             f"R\u00b2={model_result['r2']:.3f}  "
             f"Adj R\u00b2={model_result['r2_adj']:.3f}  "
-            f"n={model_result['n']}"
+            f"n={model_result['n']}{boot_label}"
         )
         return html.Div(
             [
