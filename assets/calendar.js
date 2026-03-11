@@ -64,12 +64,6 @@
     return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
   }
 
-  function addDays(d, n) {
-    var r = new Date(d);
-    r.setDate(r.getDate() + n);
-    return r;
-  }
-
   var MONTH_NAMES = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
@@ -79,7 +73,9 @@
 
   function buildBarHTML(heading, totals) {
     var keys = Object.keys(totals);
-    if (keys.length === 0) return "";
+    if (keys.length === 0) {
+      return '<span style="color:#555;font-weight:600">' + heading + ": 0 activities</span>";
+    }
 
     var entries = keys.map(function (sport) {
       return { sport: sport, stats: totals[sport] };
@@ -136,7 +132,7 @@
     if (!tbody) return;
 
     var weekTrs = tbody.querySelectorAll("tr");
-    var lastInserted = null;
+    var lastWeekTr = null;
 
     for (var w = 0; w < weekTrs.length; w++) {
       var tr = weekTrs[w];
@@ -151,14 +147,14 @@
       if (dates.length === 0) continue;
 
       dates.sort();
-      // Calendar row is Sun–Sat. Our week is Mon–Sun.
-      var sunStr = dates[0]; // Sunday
-      var sunD = new Date(sunStr + "T00:00:00");
-      var monD = addDays(sunD, -6);
+      lastWeekTr = tr;
 
-      var weekTotals = summarize(raw, toISO(monD), toISO(sunD));
+      // Use the actual date range visible in this calendar row
+      var startDate = dates[0];
+      var endDate = dates[dates.length - 1];
+
+      var weekTotals = summarize(raw, startDate, endDate);
       var barHTML = buildBarHTML("Week", weekTotals);
-      if (!barHTML) continue;
 
       var summaryTr = document.createElement("tr");
       summaryTr.className = "fc-week-summary-row";
@@ -172,11 +168,10 @@
       } else {
         tbody.appendChild(summaryTr);
       }
-      lastInserted = summaryTr;
     }
 
-    // Add month total after the last week row
-    if (lastInserted && window._fcCurrentMonth) {
+    // Add month total after the very last week row of the month
+    if (lastWeekTr && window._fcCurrentMonth) {
       var parts = window._fcCurrentMonth.split("-");
       var year = parseInt(parts[0]);
       var month = parseInt(parts[1]) - 1;
@@ -194,11 +189,8 @@
         monthTd.innerHTML = monthBarHTML;
         monthTr.appendChild(monthTd);
 
-        if (lastInserted.nextSibling) {
-          tbody.insertBefore(monthTr, lastInserted.nextSibling);
-        } else {
-          tbody.appendChild(monthTr);
-        }
+        // Append at the very end of the tbody
+        tbody.appendChild(monthTr);
       }
     }
   }
