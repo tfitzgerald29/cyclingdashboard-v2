@@ -7,11 +7,18 @@ from backend.cycling_processor import CyclingProcessor
 from ..config import CARD_STYLE, COLORS
 
 COVARIATE_LABELS = {
-    "ctl_lag3": "CTL (3mo lag)",
     "spring": "Spring (Mar-May)",
     "summer": "Summer (Jun-Aug)",
     "fall": "Fall (Sep-Nov)",
 }
+
+
+def _covariate_label(name):
+    """Return display label for a covariate, handling dynamic ctl_lagN names."""
+    if name.startswith("ctl_lag"):
+        n = name.replace("ctl_lag", "")
+        return f"CTL ({n}mo lag)"
+    return COVARIATE_LABELS.get(name, name)
 
 
 def cycling_cp_layout():
@@ -66,6 +73,22 @@ def cycling_cp_layout():
                     "marginTop": "24px",
                     "fontSize": "0.95rem",
                 },
+            ),
+            dcc.RadioItems(
+                id="cp-lag-months",
+                options=[
+                    {"label": "2 Month Lag", "value": "2"},
+                    {"label": "3 Month Lag", "value": "3"},
+                ],
+                value="3",
+                inline=True,
+                labelStyle={
+                    "marginRight": "12px",
+                    "cursor": "pointer",
+                    "color": COLORS["text"],
+                },
+                inputStyle={"marginRight": "4px"},
+                style={"marginBottom": "12px"},
             ),
             html.Div(id="cp-covariate-results"),
             html.Div(dcc.Graph(id="cp-covariate-chart"), style=CARD_STYLE),
@@ -363,11 +386,11 @@ def update_cp_over_time(period):
 @callback(
     Output("cp-covariate-results", "children"),
     Output("cp-covariate-chart", "figure"),
-    Input("cp-period", "value"),
+    Input("cp-lag-months", "value"),
 )
-def update_cp_covariates(period):
+def update_cp_covariates(lag_months):
     processor = CyclingProcessor()
-    result = processor.cp_covariate_analysis()
+    result = processor.cp_covariate_analysis(lag_months=int(lag_months))
 
     empty_fig = go.Figure()
     empty_fig.update_layout(
@@ -403,7 +426,7 @@ def update_cp_covariates(period):
         )
         rows = []
         for c in model_result["coefficients"]:
-            label = COVARIATE_LABELS.get(c["name"], c["name"])
+            label = _covariate_label(c["name"])
             if c["name"] == "const":
                 label = "Intercept (Winter baseline)"
             median_val = c.get("coef_median")
@@ -484,7 +507,7 @@ def update_cp_covariates(period):
 
     # Correlation heatmap
     corr = result["correlation"]
-    labels = [COVARIATE_LABELS.get(c, c) for c in corr["columns"]]
+    labels = [_covariate_label(c) for c in corr["columns"]]
 
     fig = go.Figure(
         data=go.Heatmap(
