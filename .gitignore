@@ -14,6 +14,7 @@ main.py
 backend/tcx_import.py
 removeoldfiles.py
 tcx_file_processor_NB.py
+tests/
 
 
 # Python
@@ -34,3 +35,6 @@ env/
 pyrightconfig.json
 uv.lock
 plotly-cloud.toml
+
+# AGENT.md
+AGENTS.md
