@@ -1,11 +1,15 @@
 import json
 import os
 
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_DATA_FILE = os.path.join(
+    _BASE_DIR, "weighttraining_data", "weighttraining_data.json"
+)
+
 
 class WeightTrainingLog:
-    DATA_FILE = "/Users/tylerfitzgerald/Documents/fitnesstracker/weighttraining_data/weighttraining_data.json"
-
-    def __init__(self):
+    def __init__(self, data_file=None):
+        self.DATA_FILE = data_file or _DEFAULT_DATA_FILE
         self.log = self._load()
 
     def _load(self):
