@@ -5,25 +5,33 @@ from datetime import date
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html, no_update
 
-from ..config import BODY_WEIGHT_LB, CARD_STYLE, COLORS, WT_DATA_FILE, WT_DRAFT_FILE
+from backend.storage import storage
+from ..config import BODY_WEIGHT_LB, CARD_STYLE, COLORS, get_user_id
 
 
-def _load_data():
-    with open(WT_DATA_FILE, "r") as f:
-        return json.load(f)
+def _load_data(user_id=None):
+    wt_file = storage.wt_data_file(user_id)
+    if not storage.path_exists(wt_file):
+        return []
+    return storage.read_json(wt_file)
 
 
-def _load_draft():
-    if os.path.exists(WT_DRAFT_FILE):
-        with open(WT_DRAFT_FILE, "r") as f:
-            return json.load(f)
+def _load_draft(user_id=None):
+    draft_file = storage.wt_draft_file(user_id)
+    if storage.path_exists(draft_file):
+        return storage.read_json(draft_file)
     return {"date": date.today().isoformat(), "exercises": []}
 
 
-def _save_draft(draft):
-    os.makedirs(os.path.dirname(WT_DRAFT_FILE), exist_ok=True)
-    with open(WT_DRAFT_FILE, "w") as f:
-        json.dump(draft, f, indent=2)
+def _save_draft(draft, user_id=None):
+    draft_file = storage.wt_draft_file(user_id)
+    if not draft_file.startswith("s3://"):
+        storage.makedirs(os.path.dirname(draft_file))
+    storage.write_json(draft_file, draft)
+
+
+def _delete_draft(user_id=None):
+    storage.delete_file(storage.wt_draft_file(user_id))
 
 
 def _get_exercise_names(data):
@@ -106,9 +114,9 @@ def _render_draft(draft):
 # ── Layout ──────────────────────────────────────────────────
 
 
-def _weights_log():
+def _weights_log(user_id=None):
     """Existing workout log and progress charts."""
-    data = _load_data()
+    data = _load_data(user_id)
     exercise_names = _get_exercise_names(data)
     sorted_data = sorted(data, key=lambda x: x["date"], reverse=True)
 
@@ -206,9 +214,9 @@ def _weights_log():
     return html.Div([comparison, session_chart])
 
 
-def _weights_personal_records():
+def _weights_personal_records(user_id=None):
     """Personal records and estimated 1RM table."""
-    data = _load_data()
+    data = _load_data(user_id)
 
     pr_data = {}  # {exercise: {max_wt, date, e1rm, e1rm_wt, e1rm_reps, e1rm_date}}
     for entry in data:
@@ -343,9 +351,9 @@ def _weights_personal_records():
     )
 
 
-def _weights_session_detail():
+def _weights_session_detail(user_id=None):
     """Session detail view with date selector."""
-    data = _load_data()
+    data = _load_data(user_id)
     sorted_data = sorted(data, key=lambda x: x["date"], reverse=True)
 
     return html.Div(
@@ -366,11 +374,11 @@ def _weights_session_detail():
     )
 
 
-def _weights_entry():
+def _weights_entry(user_id=None):
     """Workout entry form."""
-    data = _load_data()
+    data = _load_data(user_id)
     exercise_names = _get_exercise_names(data)
-    draft = _load_draft()
+    draft = _load_draft(user_id)
 
     input_style = {
         "backgroundColor": COLORS["card"],
@@ -618,7 +626,7 @@ def _weights_entry():
     )
 
 
-def weights_tab():
+def weights_tab(user_id=None):
     return html.Div(
         [
             dcc.Tabs(
@@ -674,20 +682,20 @@ def weights_tab():
                 },
             ),
             # All subtabs rendered statically; visibility toggled via callback
-            html.Div(id="weights-log-container", children=_weights_log()),
+            html.Div(id="weights-log-container", children=_weights_log(user_id)),
             html.Div(
                 id="weights-pr-container",
-                children=_weights_personal_records(),
+                children=_weights_personal_records(user_id),
                 style={"display": "none"},
             ),
             html.Div(
                 id="weights-session-container",
-                children=_weights_session_detail(),
+                children=_weights_session_detail(user_id),
                 style={"display": "none"},
             ),
             html.Div(
                 id="weights-entry-container",
-                children=_weights_entry(),
+                children=_weights_entry(user_id),
                 style={"display": "none"},
             ),
         ]
@@ -704,16 +712,18 @@ def weights_tab():
     Output("weights-entry-container", "style"),
     Output("wt-date", "date"),
     Input("weights-subtabs", "value"),
+    State("user-store", "data"),
 )
-def render_weights_subtab(subtab):
+def render_weights_subtab(subtab, user_data):
     hide = {"display": "none"}
     show = {"display": "block"}
+    uid = get_user_id(user_data)
     if subtab == "pr":
         return hide, show, hide, hide, no_update
     if subtab == "session":
         return hide, hide, show, hide, no_update
     if subtab == "entry":
-        draft = _load_draft()
+        draft = _load_draft(uid)
         return hide, hide, hide, show, draft.get("date", date.today().isoformat())
     return show, hide, hide, hide, no_update
 
@@ -721,8 +731,9 @@ def render_weights_subtab(subtab):
 @callback(
     Output("exercise-progress-table", "children"),
     Input("exercise-select", "value"),
+    State("user-store", "data"),
 )
-def update_exercise_progress(selected):
+def update_exercise_progress(selected, user_data):
     if not selected:
         return html.Div(
             "Select an exercise to see progress",
@@ -732,7 +743,7 @@ def update_exercise_progress(selected):
     if isinstance(selected, str):
         selected = [selected]
 
-    data = _load_data()
+    data = _load_data(get_user_id(user_data))
 
     # Build {exercise_name: [(date, volume, max_weight), ...]} sorted by date
     exercise_data = {}
@@ -948,14 +959,15 @@ def update_exercise_progress(selected):
 @callback(
     Output("workout-detail-content", "children"),
     Input("workout-selector", "value"),
+    State("user-store", "data"),
 )
-def update_workout_detail(selected_index):
+def update_workout_detail(selected_index, user_data):
     if selected_index is None:
         return html.Div(
             "Select a workout to view details.", style={"color": COLORS["muted"]}
         )
 
-    data = _load_data()
+    data = _load_data(get_user_id(user_data))
     sorted_data = sorted(data, key=lambda x: x["date"], reverse=True)
 
     if selected_index < 0 or selected_index >= len(sorted_data):
@@ -1102,6 +1114,7 @@ def _render_sets(sets):
     State("wt-sets-store", "data"),
     State("wt-date", "date"),
     State("wt-body-weight", "value"),
+    State("user-store", "data"),
     prevent_initial_call=True,
 )
 def handle_workout(
@@ -1114,7 +1127,9 @@ def handle_workout(
     sets,
     workout_date,
     body_weight,
+    user_data,
 ):
+    uid = get_user_id(user_data)
     triggered = ctx.triggered_id
     click_map = {
         "wt-add-exercise": add_ex_clicks,
@@ -1133,7 +1148,7 @@ def handle_workout(
             else exercise_name
         )
         if not name or not sets:
-            draft = _load_draft()
+            draft = _load_draft(uid)
             return (
                 _render_draft(draft),
                 html.Div(
@@ -1144,15 +1159,15 @@ def handle_workout(
                 new_exercise,
             )
 
-        draft = _load_draft()
+        draft = _load_draft(uid)
         draft["date"] = workout_date or date.today().isoformat()
         draft["body_weight"] = body_weight or BODY_WEIGHT_LB
         draft["exercises"].append({"name": name, "sets": sets})
-        _save_draft(draft)
+        _save_draft(draft, uid)
         return _render_draft(draft), html.Div(), None, ""
 
     if triggered == "wt-publish":
-        draft = _load_draft()
+        draft = _load_draft(uid)
         if not draft.get("exercises"):
             return (
                 _render_draft(draft),
@@ -1162,14 +1177,12 @@ def handle_workout(
             )
 
         # Load existing data and append
-        data = _load_data()
+        data = _load_data(uid)
         data.append(draft)
-        with open(WT_DATA_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        storage.write_json(storage.wt_data_file(uid), data)
 
         # Clear draft
-        if os.path.exists(WT_DRAFT_FILE):
-            os.remove(WT_DRAFT_FILE)
+        _delete_draft(uid)
 
         empty_draft = {"date": date.today().isoformat(), "exercises": []}
         return (
@@ -1180,8 +1193,7 @@ def handle_workout(
         )
 
     if triggered == "wt-clear-draft":
-        if os.path.exists(WT_DRAFT_FILE):
-            os.remove(WT_DRAFT_FILE)
+        _delete_draft(uid)
         empty_draft = {"date": date.today().isoformat(), "exercises": []}
         return (
             _render_draft(empty_draft),
@@ -1191,7 +1203,7 @@ def handle_workout(
         )
 
     if triggered == "wt-clear-exercise":
-        draft = _load_draft()
+        draft = _load_draft(uid)
         return _render_draft(draft), html.Div(), None, ""
 
     return no_update, no_update, no_update, no_update

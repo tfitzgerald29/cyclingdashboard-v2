@@ -1,10 +1,10 @@
 import plotly.graph_objects as go
-from dash import Input, Output, callback, dash_table, dcc, html
+from dash import Input, Output, State, callback, dash_table, dcc, html
 from plotly.subplots import make_subplots
 
 from backend.SportSummarizer import SportSummarizer
 
-from ..config import CARD_STYLE, COLORS, MERGED_PATH
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 
 def _stat_card(label, value, sub=""):
@@ -26,7 +26,11 @@ def _stat_card(label, value, sub=""):
         children.append(
             html.Div(
                 sub,
-                style={"fontSize": "0.7rem", "color": COLORS["muted"], "marginTop": "2px"},
+                style={
+                    "fontSize": "0.7rem",
+                    "color": COLORS["muted"],
+                    "marginTop": "2px",
+                },
             )
         )
     return html.Div(
@@ -95,9 +99,10 @@ def sports_tab():
 @callback(
     Output("sport-summary-cards", "children"),
     Input("sport-group-by", "value"),  # trigger on load
+    State("user-store", "data"),
 )
-def update_summary_cards(_group_by):
-    ss = SportSummarizer(mergedfiles_path=MERGED_PATH)
+def update_summary_cards(_group_by, user_data):
+    ss = SportSummarizer(user_id=get_user_id(user_data))
     stats = ss.get_summary_stats()
 
     cards = [
@@ -124,9 +129,10 @@ def update_summary_cards(_group_by):
 @callback(
     Output("sport-total-chart", "figure"),
     Input("sport-group-by", "value"),
+    State("user-store", "data"),
 )
-def update_total_chart(group_by):
-    ss = SportSummarizer(mergedfiles_path=MERGED_PATH)
+def update_total_chart(group_by, user_data):
+    ss = SportSummarizer(user_id=get_user_id(user_data))
     data = ss.get_chart_data(group_by=group_by)
 
     if not data:
@@ -179,9 +185,10 @@ def update_total_chart(group_by):
 @callback(
     Output("sport-chart", "figure"),
     Input("sport-group-by", "value"),
+    State("user-store", "data"),
 )
-def update_sport_chart(group_by):
-    ss = SportSummarizer(mergedfiles_path=MERGED_PATH)
+def update_sport_chart(group_by, user_data):
+    ss = SportSummarizer(user_id=get_user_id(user_data))
     data = ss.get_chart_data(group_by=group_by)
 
     if not data:
@@ -263,9 +270,13 @@ def update_sport_chart(group_by):
     return fig
 
 
-@callback(Output("sport-summary-table", "children"), Input("sport-group-by", "value"))
-def update_sport_summary(group_by):
-    ss = SportSummarizer(mergedfiles_path=MERGED_PATH)
+@callback(
+    Output("sport-summary-table", "children"),
+    Input("sport-group-by", "value"),
+    State("user-store", "data"),
+)
+def update_sport_summary(group_by, user_data):
+    ss = SportSummarizer(user_id=get_user_id(user_data))
     df = ss.summarize_hours_by_sport(group_by=group_by)
 
     if df is None or df.is_empty():

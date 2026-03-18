@@ -11,6 +11,11 @@ def create_layout():
             "color": COLORS["text"],
         },
         children=[
+            # ── Auth primitives ───────────────────────────────────────────────
+            # dcc.Store persists the authenticated user across callbacks.
+            # storage_type="session" means it clears when the browser tab closes.
+            dcc.Store(id="user-store", storage_type="session"),
+            # ── Nav bar + tab content (hidden until authenticated) ────────────
             html.Div(
                 style={
                     "backgroundColor": COLORS["card"],
@@ -34,6 +39,25 @@ def create_layout():
                         id="tabs",
                         value="calendar",
                         children=[
+                            dcc.Tab(
+                                label="Upload",
+                                value="upload",
+                                style={
+                                    "padding": "6px 20px",
+                                    "lineHeight": "28px",
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "justifyContent": "center",
+                                },
+                                selected_style={
+                                    "padding": "6px 20px",
+                                    "lineHeight": "28px",
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "justifyContent": "center",
+                                    "borderTop": f"2px solid {COLORS['accent']}",
+                                },
+                            ),
                             dcc.Tab(
                                 label="Calendar",
                                 value="calendar",
@@ -211,6 +235,25 @@ def create_layout():
                                     "alignItems": "center",
                                     "justifyContent": "center",
                                     "borderTop": "2px solid #AB47BC",
+                                },
+                            ),
+                            dcc.Tab(
+                                label="Sleep",
+                                value="sleep",
+                                style={
+                                    "padding": "6px 20px",
+                                    "lineHeight": "28px",
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "justifyContent": "center",
+                                },
+                                selected_style={
+                                    "padding": "6px 20px",
+                                    "lineHeight": "28px",
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "justifyContent": "center",
+                                    "borderTop": "2px solid #00BCD4",
                                 },
                             ),
                         ],

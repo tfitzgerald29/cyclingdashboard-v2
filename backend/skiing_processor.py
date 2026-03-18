@@ -3,11 +3,7 @@ import os
 import polars as pl
 
 from .schemas import load_sessions
-
-# ── Path resolution (mirrors FitFileProcessor defaults) ──────────────────────
-
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_MERGED_PATH = os.path.join(_BASE_DIR, "mergedfiles")
+from .storage import storage
 
 
 class skiing:
@@ -17,14 +13,14 @@ class skiing:
     separately at startup via FitFileProcessor.run() in app.py.
     """
 
-    def __init__(self, mergedfiles_path=None) -> None:
-        self.mergedfiles_path = mergedfiles_path or _DEFAULT_MERGED_PATH
+    def __init__(self, mergedfiles_path=None, user_id=None) -> None:
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
         self.skiing = self.load_skiing_data()
 
     # ── Data loading ──────────────────────────────────────────────────────────
 
     def load_skiing_data(self) -> pl.DataFrame:
-        parquet_path = os.path.join(self.mergedfiles_path, "session_mesgs.parquet")
+        parquet_path = storage.path_join(self.mergedfiles_path, "session_mesgs.parquet")
         df = load_sessions("skiing", parquet_path)
         if df.is_empty():
             return df
@@ -105,7 +101,7 @@ class skiing:
         elevation_ft = enhanced_altitude × 3.28084
         speed_mph    = enhanced_speed   × 2.23694
         """
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
         empty: dict = {
             "lat": [],
             "lon": [],
@@ -113,7 +109,7 @@ class skiing:
             "speed_mph": [],
             "heart_rate": [],
         }
-        if not os.path.exists(records_path):
+        if not storage.path_exists(records_path):
             return empty
 
         SEMICIRCLES_TO_DEGREES = 180.0 / (2**31)

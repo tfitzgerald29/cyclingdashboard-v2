@@ -1,20 +1,20 @@
-import os
-
 import plotly.graph_objects as go
 import polars as pl
-from dash import Input, Output, callback, dash_table, dcc, html
+from dash import Input, Output, State, callback, dash_table, dcc, html
 
 from backend.schemas import load_sessions, load_splits, load_split_summaries
-from ..config import CARD_STYLE, COLORS, MERGED_PATH
+from backend.storage import storage
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 FEET_PER_ROUTE = 45
 
 
-def _load_climbing_data():
+def _load_climbing_data(user_id=None):
     """Load session and split data filtered to rock climbing."""
-    sessions_path = os.path.join(MERGED_PATH, "session_mesgs.parquet")
-    splits_path = os.path.join(MERGED_PATH, "split_mesgs.parquet")
-    summaries_path = os.path.join(MERGED_PATH, "split_summary_mesgs.parquet")
+    merged = storage.merged_path(user_id)
+    sessions_path = storage.path_join(merged, "session_mesgs.parquet")
+    splits_path = storage.path_join(merged, "split_mesgs.parquet")
+    summaries_path = storage.path_join(merged, "split_summary_mesgs.parquet")
 
     sessions = load_sessions("climbing", sessions_path)
     if sessions.is_empty():
@@ -128,12 +128,13 @@ def climbing_tab():
     Output("climbing-session-dropdown", "value"),
     Output("climbing-trends-chart", "figure"),
     Input("tabs", "value"),
+    State("user-store", "data"),
 )
-def update_climbing_overview(tab):
+def update_climbing_overview(tab, user_data):
     if tab != "climbing":
         return [], [], None, go.Figure()
 
-    sessions, splits, _summaries = _load_climbing_data()
+    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id(user_data))
 
     if sessions.is_empty():
         return (
@@ -261,12 +262,13 @@ def update_climbing_overview(tab):
 @callback(
     Output("climbing-session-detail", "children"),
     Input("climbing-session-dropdown", "value"),
+    State("user-store", "data"),
 )
-def update_climbing_session(source_file):
+def update_climbing_session(source_file, user_data):
     if not source_file:
         return []
 
-    sessions, splits, _summaries = _load_climbing_data()
+    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id(user_data))
     if sessions.is_empty():
         return []
 

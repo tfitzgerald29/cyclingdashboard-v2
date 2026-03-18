@@ -7,6 +7,7 @@ import polars as pl
 import statsmodels.formula.api as smf
 
 from ..schemas import load_records
+from ..storage import storage
 
 
 class CpModelMixin:
@@ -15,7 +16,9 @@ class CpModelMixin:
     # Dense durations for CP model fitting: every second from 2min–20min
     CURVE_DURATIONS = list(range(120, 1201))
 
-    def get_best_power_curve(self, period_months=None, as_of=None, chart=False):
+    def get_best_power_curve(
+        self, period_months=None, as_of=None, chart=False, _power_curves_df=None
+    ):
         """Get best power curve from the precomputed cache.
 
         Args:
@@ -23,10 +26,15 @@ class CpModelMixin:
             as_of: Reference date for the window.
             chart: If True, also compute sparse CHART_DURATIONS outside the
                    cached 2-20min range (for display on the power curve chart).
+            _power_curves_df: Pre-loaded power curves DataFrame. If provided,
+                              skips reading from disk/S3 (used by cp_over_time
+                              to avoid re-reading the file for every month).
         """
-        cache_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
-        if not os.path.exists(cache_path):
-            return {"durations": [], "watts": []}
+        cache_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
+
+        if _power_curves_df is None:
+            if not storage.path_exists(cache_path):
+                return {"durations": [], "watts": []}
 
         df = self.cycling.clone()
         if df.is_empty():
@@ -46,9 +54,12 @@ class CpModelMixin:
         if not source_files:
             return {"durations": [], "watts": []}
 
-        cache = pl.read_parquet(cache_path).filter(
-            pl.col("source_file").is_in(source_files)
+        full_cache = (
+            _power_curves_df
+            if _power_curves_df is not None
+            else storage.read_parquet(cache_path)
         )
+        cache = full_cache.filter(pl.col("source_file").is_in(source_files))
 
         if cache.is_empty():
             return {"durations": [], "watts": []}
@@ -71,10 +82,10 @@ class CpModelMixin:
                 d for d in self.CHART_DURATIONS if d not in best_by_duration
             ]
             if extra_durations:
-                records_path = os.path.join(
+                records_path = storage.path_join(
                     self.mergedfiles_path, "record_mesgs.parquet"
                 )
-                if os.path.exists(records_path):
+                if storage.path_exists(records_path):
                     records = load_records(
                         "cycling",
                         records_path,
@@ -110,8 +121,12 @@ class CpModelMixin:
         watts = [best_by_duration[d] for d in durations]
         return {"durations": durations, "watts": watts}
 
-    def estimate_critical_power(self, period_months=None, as_of=None):
-        curve = self.get_best_power_curve(period_months, as_of)
+    def estimate_critical_power(
+        self, period_months=None, as_of=None, _power_curves_df=None
+    ):
+        curve = self.get_best_power_curve(
+            period_months, as_of, _power_curves_df=_power_curves_df
+        )
         durations = curve["durations"]
         watts = curve["watts"]
 
@@ -178,6 +193,11 @@ class CpModelMixin:
         }
 
     def cp_over_time(self, period_months: int) -> dict:
+        # Cache key: user's merged path + period so different users/periods are separate
+        cache_key = f"{self.mergedfiles_path}:cp_over_time:{period_months}"
+        cached = storage.get_compute_cache(cache_key)
+        if cached is not None:
+            return cached
         """Compute CP and W' at monthly intervals using a rolling window.
 
         Args:
@@ -204,6 +224,14 @@ class CpModelMixin:
         if start > max_date:
             return {"dates": [], "cp": [], "wprime_kj": [], "r2": []}
 
+        # Load power curves once for the entire loop
+        cache_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
+        power_curves_df = (
+            storage.read_parquet(cache_path)
+            if storage.path_exists(cache_path)
+            else None
+        )
+
         # Generate monthly sample points
         dates = []
         cp_vals = []
@@ -215,7 +243,9 @@ class CpModelMixin:
 
         while current <= end:
             result = self.estimate_critical_power(
-                period_months=period_months, as_of=current
+                period_months=period_months,
+                as_of=current,
+                _power_curves_df=power_curves_df,
             )
             if result["cp"] is not None:
                 dates.append(current.isoformat())
@@ -229,28 +259,97 @@ class CpModelMixin:
             else:
                 current = date(current.year, current.month + 1, 1)
 
-        return {"dates": dates, "cp": cp_vals, "wprime_kj": wprime_vals, "r2": r2_vals}
+        result = {
+            "dates": dates,
+            "cp": cp_vals,
+            "wprime_kj": wprime_vals,
+            "r2": r2_vals,
+        }
+        storage.set_compute_cache(cache_key, result)
+        return result
 
     # Durations to regress against covariates (seconds -> label)
     PEAK_REGRESSION_DURATIONS = {120: "2min", 300: "5min", 1200: "20min"}
 
-    def cp_covariate_analysis(self, lag_months: int = 3) -> dict:
+    # Sleep covariate name used in the model → column name in sleep.parquet
+    SLEEP_COVARIATE_COL = "sleep_score"
+    SLEEP_PARQUET_COL = "score_overall"
+
+    # ── Sleep covariate helper ────────────────────────────────────────────────
+
+    def _build_sleep_covariates(self, rides_df: pl.DataFrame) -> pl.DataFrame:
+        """Compute monthly mean sleep score weighted by ride-days.
+
+        For each ride, looks up the Garmin sleep score for the night immediately
+        before the ride (calendar_date == ride_date - 1 day), then aggregates to
+        monthly means across all rides in that month.
+
+        Args:
+            rides_df: Per-ride DataFrame with columns source_file, timestamp
+                      (tz-aware America/Denver), month (Date).
+
+        Returns:
+            DataFrame with columns [month, sleep_score], or empty DataFrame
+            if sleep.parquet is missing or has no overlap.
+        """
+        sleep_path = storage.path_join(self.mergedfiles_path, "sleep.parquet")
+        if not storage.path_exists(sleep_path):
+            return pl.DataFrame()
+
+        sleep = storage.read_parquet(sleep_path)
+        sleep = (
+            sleep.filter(pl.col("calendar_date").is_not_null())
+            .with_columns(pl.col("calendar_date").str.to_date().alias("calendar_date"))
+            .select(["calendar_date", self.SLEEP_PARQUET_COL])
+        )
+        if sleep.is_empty():
+            return pl.DataFrame()
+
+        # For each ride, look up the night before (ride_date - 1)
+        rides_with_date = rides_df.select(
+            ["source_file", "month", "timestamp"]
+        ).with_columns(
+            (pl.col("timestamp").dt.date() - pl.duration(days=1)).alias("prior_night")
+        )
+
+        per_ride = rides_with_date.join(
+            sleep.rename({"calendar_date": "prior_night"}),
+            on="prior_night",
+            how="left",
+        )
+
+        monthly = (
+            per_ride.group_by("month")
+            .agg(pl.col(self.SLEEP_PARQUET_COL).mean().alias(self.SLEEP_COVARIATE_COL))
+            .sort("month")
+        )
+
+        return monthly
+
+    def cp_covariate_analysis(self, include_sleep: bool = False) -> dict:
         """Regress monthly best peak powers at key durations against covariates.
 
         Uses raw peak powers (2min, 5min, 20min) as dependent variables
         instead of derived CP/W', avoiding the artifact where the 2-param
         model forces CP and W' to trade off against each other.
 
-        Args:
-            lag_months: Number of months to lag CTL (default 3).
+        All continuous covariates are mean-centered so the intercept reads as
+        predicted peak power for an average month.
 
-        Covariates: lagged CTL + season dummies (winter=reference).
+        Args:
+            include_sleep: When True, joins the prior-night Garmin sleep score
+                as an additional covariate. Only months with both power and
+                sleep data are included (inner join).
+
+        Covariates:
+            tss_per_100   — monthly TSS sum / 100  (W per 100 TSS)
+            ascent_per_1k — monthly ascent sum / 1000m  (W per 1000m climbed)
+            sleep_score   — mean prior-night Garmin sleep score [optional]
         """
-        cache_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
-        if not os.path.exists(cache_path):
+        cache_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
+        if not storage.path_exists(cache_path):
             return {"models": None, "data": None}
 
-        ctl_atl = self.compute_ctl_atl()
         df = self.cycling.clone()
         if df.is_empty():
             return {"models": None, "data": None}
@@ -262,8 +361,8 @@ class CpModelMixin:
             pl.col(ts_col).dt.convert_time_zone("America/Denver"),
         )
 
-        # Load power curves and join with session timestamps
-        curves = pl.read_parquet(cache_path)
+        # Load power curves and join with session timestamps + training data
+        curves = storage.read_parquet(cache_path)
         dur_cols = {
             f"d_{d}": label for d, label in self.PEAK_REGRESSION_DURATIONS.items()
         }
@@ -274,7 +373,7 @@ class CpModelMixin:
             return {"models": None, "data": None}
 
         rides = (
-            df.select("source_file", ts_col)
+            df.select(["source_file", ts_col, "training_stress_score"])
             .join(
                 curves.select(["source_file"] + list(available_dur_cols.keys())),
                 on="source_file",
@@ -285,53 +384,39 @@ class CpModelMixin:
             )
         )
 
-        # Monthly best peak power at each duration
-        monthly_peaks = rides.group_by("month").agg(
-            [pl.col(c).max().alias(c) for c in available_dur_cols]
+        # Monthly aggregates — best peak power + scaled training covariate
+        monthly = (
+            rides.group_by("month")
+            .agg(
+                [pl.col(c).max().alias(c) for c in available_dur_cols]
+                + [
+                    (pl.col("training_stress_score").sum() / 100.0).alias(
+                        "tss_per_100"
+                    ),
+                ]
+            )
+            .sort("month")
         )
 
-        # Monthly CTL snapshots (end-of-month value)
-        monthly_ctl = (
-            ctl_atl.filter(~pl.col("is_projection"))
-            .with_columns(pl.col("date").dt.truncate("1mo").alias("month"))
-            .group_by("month")
-            .agg(pl.col("ctl").last().alias("ctl"))
-        )
+        combined = monthly.clone()
 
-        # Join and sort
-        combined = monthly_peaks.join(monthly_ctl, on="month", how="left").sort("month")
-
-        # 3-month lagged CTL
-        ctl_col = f"ctl_lag{lag_months}"
-        combined = combined.with_columns(
-            pl.col("ctl").shift(lag_months).alias(ctl_col),
-        )
-
-        # Season dummies (winter=Dec-Feb is reference)
-        combined = combined.with_columns(
-            pl.col("month").dt.month().alias("mo_num"),
-        )
-        combined = combined.with_columns(
-            pl.when(pl.col("mo_num").is_in([3, 4, 5]))
-            .then(1)
-            .otherwise(0)
-            .alias("spring"),
-            pl.when(pl.col("mo_num").is_in([6, 7, 8]))
-            .then(1)
-            .otherwise(0)
-            .alias("summer"),
-            pl.when(pl.col("mo_num").is_in([9, 10, 11]))
-            .then(1)
-            .otherwise(0)
-            .alias("fall"),
-        ).drop("mo_num")
+        # Optionally join sleep covariates (inner — only months with both power + sleep)
+        if include_sleep:
+            sleep_monthly = self._build_sleep_covariates(rides)
+            if sleep_monthly.is_empty():
+                include_sleep = False  # graceful fallback
+            else:
+                combined = combined.join(sleep_monthly, on="month", how="inner")
 
         combined = combined.drop_nulls()
 
         if len(combined) < 5:
             return {"models": None, "data": None}
 
-        covariate_names = [ctl_col, "spring", "summer", "fall"]
+        covariate_names = ["tss_per_100"]
+        if include_sleep:
+            covariate_names.append(self.SLEEP_COVARIATE_COL)
+
         usable = []
         for c in covariate_names:
             col = combined[c].drop_nulls()
@@ -341,37 +426,34 @@ class CpModelMixin:
         if len(usable) < 1:
             return {"models": None, "data": None}
 
+        # Mean-center all continuous covariates so the intercept reads as
+        # "predicted peak power for a perfectly average month" rather than
+        # the nonsensical prediction at TSS=0 / sleep_score=0.
+        for c in usable:
+            combined = combined.with_columns((pl.col(c) - pl.col(c).mean()).alias(c))
+
         pdf = combined.select(
             ["month"] + list(available_dur_cols.keys()) + usable
         ).to_pandas()
 
-        formula_rhs = " + ".join(usable)
-
         # Load cached bootstrap results if available
-        boot_cache_path = os.path.join(
+        cache_key = "sleep" if include_sleep else "no_sleep"
+        boot_cache_path = storage.path_join(
             self.mergedfiles_path, "cp_covariate_bootstrap.json"
         )
         boot_cache = {}
-        if os.path.exists(boot_cache_path):
-            with open(boot_cache_path) as f:
-                full_cache = json.load(f)
-            # Support both new keyed format and legacy flat format
-            lag_key = f"lag{lag_months}"
-            if lag_key in full_cache:
-                boot_cache = full_cache[lag_key]
-            elif not any(k.startswith("lag") for k in full_cache):
-                # Legacy flat format (pre-lag support), only valid for lag=3
-                if lag_months == 3:
-                    boot_cache = full_cache
+        if storage.path_exists(boot_cache_path):
+            full_cache = storage.read_json(boot_cache_path)
+            if cache_key in full_cache:
+                boot_cache = full_cache[cache_key]
 
         def _fit_ols(dep_col, pdf):
-            formula = f"{dep_col} ~ {formula_rhs}"
+            formula = f"{dep_col} ~ {' + '.join(usable)}"
             model = smf.ols(formula, data=pdf).fit(
-                cov_type="HAC", cov_kwds={"maxlags": lag_months}
+                cov_type="HAC", cov_kwds={"maxlags": 3}
             )
             param_names = list(model.params.index)
 
-            # Use bootstrap CIs from cache if available
             boot_result = boot_cache.get(dep_col)
 
             coefs = []
@@ -384,7 +466,6 @@ class CpModelMixin:
                     "ci_low": round(float(model.conf_int().loc[name][0]), 4),
                     "ci_high": round(float(model.conf_int().loc[name][1]), 4),
                 }
-                # Overlay bootstrap results if cached
                 if boot_result:
                     key = "const" if name == "Intercept" else name
                     for bc in boot_result["coefficients"]:
@@ -409,7 +490,6 @@ class CpModelMixin:
                 result["n_bootstrap"] = boot_result.get("n_bootstrap", 0)
             return result
 
-        # Fit a model for each duration
         models = {}
         dep_cols = []
         for col, label in available_dur_cols.items():
@@ -444,14 +524,13 @@ class CpModelMixin:
     def refresh_cp_covariate_bootstrap(self, n_bootstrap: int = 5000) -> None:
         """Run bootstrap resampling for CP covariate models and cache results.
 
-        Runs for each lag variant (2 and 3 months) and stores under
-        separate keys in the JSON cache.
+        Runs for no_sleep and sleep variants and stores under keys:
+        no_sleep, sleep.
         """
-        cache_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
-        if not os.path.exists(cache_path):
+        cache_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
+        if not storage.path_exists(cache_path):
             return
 
-        ctl_atl = self.compute_ctl_atl()
         df = self.cycling.clone()
         if df.is_empty():
             return
@@ -463,7 +542,7 @@ class CpModelMixin:
             pl.col(ts_col).dt.convert_time_zone("America/Denver"),
         )
 
-        curves = pl.read_parquet(cache_path)
+        curves = storage.read_parquet(cache_path)
         dur_cols = {
             f"d_{d}": label for d, label in self.PEAK_REGRESSION_DURATIONS.items()
         }
@@ -474,7 +553,7 @@ class CpModelMixin:
             return
 
         rides = (
-            df.select("source_file", ts_col)
+            df.select(["source_file", ts_col, "training_stress_score"])
             .join(
                 curves.select(["source_file"] + list(available_dur_cols.keys())),
                 on="source_file",
@@ -485,52 +564,48 @@ class CpModelMixin:
             )
         )
 
-        monthly_peaks = rides.group_by("month").agg(
-            [pl.col(c).max().alias(c) for c in available_dur_cols]
+        base_monthly = (
+            rides.group_by("month")
+            .agg(
+                [pl.col(c).max().alias(c) for c in available_dur_cols]
+                + [
+                    (pl.col("training_stress_score").sum() / 100.0).alias(
+                        "tss_per_100"
+                    ),
+                ]
+            )
+            .sort("month")
         )
 
-        monthly_ctl = (
-            ctl_atl.filter(~pl.col("is_projection"))
-            .with_columns(pl.col("date").dt.truncate("1mo").alias("month"))
-            .group_by("month")
-            .agg(pl.col("ctl").last().alias("ctl"))
+        sleep_monthly = self._build_sleep_covariates(rides)
+
+        out_path = storage.path_join(
+            self.mergedfiles_path, "cp_covariate_bootstrap.json"
+        )
+        full_boot_cache = (
+            storage.read_json(out_path) if storage.path_exists(out_path) else {}
         )
 
-        base_combined = monthly_peaks.join(monthly_ctl, on="month", how="left").sort(
-            "month"
-        )
+        for with_sleep in (False, True):
+            cache_key = "sleep" if with_sleep else "no_sleep"
 
-        # Add season dummies once
-        base_combined = base_combined.with_columns(
-            pl.col("month").dt.month().alias("mo_num"),
-        )
-        base_combined = base_combined.with_columns(
-            pl.when(pl.col("mo_num").is_in([3, 4, 5]))
-            .then(1)
-            .otherwise(0)
-            .alias("spring"),
-            pl.when(pl.col("mo_num").is_in([6, 7, 8]))
-            .then(1)
-            .otherwise(0)
-            .alias("summer"),
-            pl.when(pl.col("mo_num").is_in([9, 10, 11]))
-            .then(1)
-            .otherwise(0)
-            .alias("fall"),
-        ).drop("mo_num")
+            if with_sleep and sleep_monthly.is_empty():
+                continue
 
-        full_boot_cache = {}
+            if with_sleep:
+                combined = base_monthly.join(sleep_monthly, on="month", how="inner")
+            else:
+                combined = base_monthly.clone()
 
-        for lag in (2, 3):
-            ctl_col = f"ctl_lag{lag}"
-            combined = base_combined.with_columns(
-                pl.col("ctl").shift(lag).alias(ctl_col),
-            ).drop_nulls()
+            combined = combined.drop_nulls()
 
             if len(combined) < 5:
                 continue
 
-            covariate_names = [ctl_col, "spring", "summer", "fall"]
+            covariate_names = ["tss_per_100"]
+            if with_sleep:
+                covariate_names.append(self.SLEEP_COVARIATE_COL)
+
             usable = []
             for c in covariate_names:
                 col = combined[c].drop_nulls()
@@ -539,25 +614,30 @@ class CpModelMixin:
             if len(usable) < 1:
                 continue
 
+            # Mean-center covariates (mirrors cp_covariate_analysis)
+            for c in usable:
+                combined = combined.with_columns(
+                    (pl.col(c) - pl.col(c).mean()).alias(c)
+                )
+
             pdf = combined.select(
                 ["month"] + list(available_dur_cols.keys()) + usable
             ).to_pandas()
 
-            formula_rhs = " + ".join(usable)
-            cov_cols = usable
             n = len(pdf)
             rng = np.random.default_rng(42)
+            variant_cache = {}
 
-            lag_cache = {}
             for dep_col in available_dur_cols:
-                formula = f"{dep_col} ~ {formula_rhs}"
+                y_full = pdf[dep_col].values.astype(float)
+
+                formula = f"{dep_col} ~ {' + '.join(usable)}"
                 model = smf.ols(formula, data=pdf).fit()
                 param_names = list(model.params.index)
                 n_params = len(param_names)
 
-                y_full = pdf[dep_col].values.astype(float)
                 X_full = np.column_stack(
-                    [np.ones(n)] + [pdf[c].values.astype(float) for c in cov_cols]
+                    [np.ones(n)] + [pdf[c].values.astype(float) for c in usable]
                 )
 
                 boot_coefs = np.empty((n_bootstrap, n_params))
@@ -581,10 +661,11 @@ class CpModelMixin:
                         float(np.percentile(boot_dist, 97.5)),
                     )
                     point = float(model.params[name])
-                    if point >= 0:
-                        p_boot = 2 * float(np.mean(boot_dist <= 0))
-                    else:
-                        p_boot = 2 * float(np.mean(boot_dist >= 0))
+                    p_boot = 2 * float(
+                        np.mean(boot_dist <= 0)
+                        if point >= 0
+                        else np.mean(boot_dist >= 0)
+                    )
                     p_boot = min(p_boot, 1.0)
 
                     coefs.append(
@@ -598,13 +679,11 @@ class CpModelMixin:
                         }
                     )
 
-                lag_cache[dep_col] = {
+                variant_cache[dep_col] = {
                     "n_bootstrap": int(np.sum(valid)),
                     "coefficients": coefs,
                 }
 
-            full_boot_cache[f"lag{lag}"] = lag_cache
+            full_boot_cache[cache_key] = variant_cache
 
-        out_path = os.path.join(self.mergedfiles_path, "cp_covariate_bootstrap.json")
-        with open(out_path, "w") as f:
-            json.dump(full_boot_cache, f, indent=2)
+        storage.write_json(out_path, full_boot_cache)

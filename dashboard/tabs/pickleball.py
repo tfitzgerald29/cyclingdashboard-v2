@@ -1,10 +1,9 @@
-import os
-
 import polars as pl
-from dash import Input, Output, callback, dash_table, html
+from dash import Input, Output, State, callback, dash_table, html
 
 from backend.schemas import load_sessions
-from ..config import CARD_STYLE, COLORS, MERGED_PATH
+from backend.storage import storage
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 ACCENT = "#AB47BC"  # racket / pickleball purple
 
@@ -57,10 +56,11 @@ def _stat_card(label, value, sub=""):
     )
 
 
-def _load_pickleball() -> pl.DataFrame:
+def _load_pickleball(user_id=None) -> pl.DataFrame:
     """Load racket/pickleball sessions from the shared session parquet."""
-    parquet_path = os.path.join(MERGED_PATH, "session_mesgs.parquet")
-    if not os.path.exists(parquet_path):
+    merged = storage.merged_path(user_id)
+    parquet_path = storage.path_join(merged, "session_mesgs.parquet")
+    if not storage.path_exists(parquet_path):
         return pl.DataFrame()
     # Pickleball lives under sport="racket", sub_sport="pickleball"
     df = pl.read_parquet(parquet_path).filter(
@@ -104,12 +104,13 @@ def pickleball_tab():
     Output("pickleball-summary-cards", "children"),
     Output("pickleball-session-list", "children"),
     Input("tabs", "value"),
+    State("user-store", "data"),
 )
-def update_pickleball_overview(tab):
+def update_pickleball_overview(tab, user_data):
     if tab != "pickleball":
         return [], []
 
-    df = _load_pickleball()
+    df = _load_pickleball(user_id=get_user_id(user_data))
 
     if df.is_empty():
         return [

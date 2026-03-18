@@ -1,4 +1,5 @@
 from .calendar import calendar_tab  # noqa: F401
+from .upload import upload_tab, handle_upload  # noqa: F401
 from .climbing import climbing_tab, update_climbing_overview, update_climbing_session  # noqa: F401
 from .cycling import cycling_tab  # noqa: F401 — importing the module registers all @callback decorators
 from .hiking import hiking_tab, update_hiking_overview, update_hiking_session  # noqa: F401
@@ -24,4 +25,10 @@ from .weights import (
     update_exercise_progress,
     handle_sets,
     handle_workout,
+)  # noqa: F401
+from .sleep import (
+    sleep_tab,
+    update_sleep_overview,
+    update_sleep_trend,
+    update_sleep_stages,
 )  # noqa: F401

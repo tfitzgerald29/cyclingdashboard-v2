@@ -1,10 +1,10 @@
 import plotly.graph_objects as go
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html
 from plotly.subplots import make_subplots
 
 from backend.cycling_processor import CyclingProcessor
 
-from ..config import CARD_STYLE, COLORS
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 
 def _x_labels(df, group_by):
@@ -94,9 +94,10 @@ def cycling_overview_layout():
 @callback(
     Output("cycling-summary-chart", "figure"),
     Input("cycling-summary-group", "value"),
+    State("user-store", "data"),
 )
-def update_cycling_summary(group_by):
-    cp = CyclingProcessor()
+def update_cycling_summary(group_by, user_data):
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
     df = cp.summarize_cycling(group_by=group_by)
 
     if df.is_empty():
@@ -201,8 +202,9 @@ def update_cycling_summary(group_by):
     Output("training-load-chart", "figure"),
     Input("date-range", "value"),
     Input("show-forecast", "value"),
+    State("user-store", "data"),
 )
-def update_training_load(date_range, show_forecast):
+def update_training_load(date_range, show_forecast, user_data):
     start_date = None
     if date_range != "all":
         from datetime import date, timedelta
@@ -211,7 +213,7 @@ def update_training_load(date_range, show_forecast):
         d = date.today()
         start_date = (d.replace(day=1) - timedelta(days=months * 30)).isoformat()
 
-    cp = CyclingProcessor()
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
     fig = cp.plot_training_load(
         start_date=start_date, include_forecast="yes" in (show_forecast or [])
     )

@@ -10,11 +10,7 @@ from .mixins import (
     TrainingLoadMixin,
 )
 from .schemas import load_records, load_sessions
-
-# ── Path resolution (mirrors FitFileProcessor defaults) ──────────────────────
-
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_MERGED_PATH = os.path.join(_BASE_DIR, "mergedfiles")
+from .storage import storage
 
 
 class CyclingProcessor(
@@ -30,8 +26,8 @@ class CyclingProcessor(
     via ``FitFileProcessor.run()`` in app.py.
     """
 
-    def __init__(self, mergedfiles_path=None):
-        self.mergedfiles_path = mergedfiles_path or _DEFAULT_MERGED_PATH
+    def __init__(self, mergedfiles_path=None, user_id=None):
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
         self.cycling = self._load_cycling_sessions()
         self._update_power_curve_cache()
         self._update_bootstrap_cache()
@@ -40,7 +36,7 @@ class CyclingProcessor(
 
     def _load_cycling_sessions(self) -> pl.DataFrame:
         """Load session_mesgs parquet and filter to cycling activities."""
-        parquet_path = os.path.join(self.mergedfiles_path, "session_mesgs.parquet")
+        parquet_path = storage.path_join(self.mergedfiles_path, "session_mesgs.parquet")
         return load_sessions("cycling", parquet_path)
 
     def _update_power_curve_cache(self):
@@ -49,10 +45,10 @@ class CyclingProcessor(
         Stores power_curves.parquet with columns: source_file, d_120, d_121, ..., d_1200.
         Only computes for rides not already in the cache.
         """
-        cache_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
+        cache_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
 
-        if not os.path.exists(records_path):
+        if not storage.path_exists(records_path):
             return
 
         # All cycling source files
@@ -67,8 +63,8 @@ class CyclingProcessor(
         # Load existing cache
         cached_files = set()
         existing_cache = None
-        if os.path.exists(cache_path):
-            existing_cache = pl.read_parquet(cache_path)
+        if storage.path_exists(cache_path):
+            existing_cache = storage.read_parquet(cache_path)
             cached_files = set(existing_cache["source_file"].unique().to_list())
 
         new_files = all_cycling_files - cached_files
@@ -113,17 +109,19 @@ class CyclingProcessor(
         if existing_cache is not None:
             new_cache = pl.concat([existing_cache, new_cache], how="diagonal_relaxed")
 
-        new_cache.write_parquet(cache_path)
+        storage.write_parquet(new_cache, cache_path)
         print(f"  Power curve cache: added {len(rows)} rides (total: {len(new_cache)})")
 
     def _update_bootstrap_cache(self):
         """Refresh the CP covariate bootstrap cache if data has changed."""
-        boot_path = os.path.join(self.mergedfiles_path, "cp_covariate_bootstrap.json")
-        curves_path = os.path.join(self.mergedfiles_path, "power_curves.parquet")
+        boot_path = storage.path_join(
+            self.mergedfiles_path, "cp_covariate_bootstrap.json"
+        )
+        curves_path = storage.path_join(self.mergedfiles_path, "power_curves.parquet")
         # Re-run bootstrap if cache is missing or older than power curves
-        if os.path.exists(curves_path) and (
-            not os.path.exists(boot_path)
-            or os.path.getmtime(boot_path) < os.path.getmtime(curves_path)
+        if storage.path_exists(curves_path) and (
+            not storage.path_exists(boot_path)
+            or storage.path_mtime(boot_path) < storage.path_mtime(curves_path)
         ):
             print("  Refreshing CP covariate bootstrap cache...")
             self.refresh_cp_covariate_bootstrap()
@@ -228,7 +226,7 @@ class CyclingProcessor(
 
     def _load_ride_power(self, source_file: str) -> list[int] | None:
         """Load and clean power data for a single ride from record_mesgs."""
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
 
         records = load_records(
             "cycling",

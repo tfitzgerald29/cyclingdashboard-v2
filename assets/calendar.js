@@ -197,6 +197,47 @@
 
   // --- Calendar init ---
 
+  function sleepColor(score) {
+    if (score >= 80) return "#4CAF50";
+    if (score >= 60) return "#FF9800";
+    return "#f44336";
+  }
+
+  function injectSleepScores(sleepData) {
+    var cells = document.querySelectorAll(".fc .fc-daygrid-day[data-date]");
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      var date = cell.getAttribute("data-date");
+      // Remove any previously injected pill
+      var old = cell.querySelector(".fc-sleep-pill");
+      if (old) old.parentNode.removeChild(old);
+      if (!date || sleepData[date] === undefined) continue;
+      var score = sleepData[date];
+      var pill = document.createElement("div");
+      pill.className = "fc-sleep-pill";
+      pill.title = "Sleep score: " + score;
+      pill.style.cssText = [
+        "position:absolute",
+        "bottom:3px",
+        "right:4px",
+        "fontSize:9px",
+        "fontWeight:600",
+        "lineHeight:14px",
+        "padding:0 4px",
+        "borderRadius:3px",
+        "background:" + sleepColor(score),
+        "color:#fff",
+        "opacity:0.85",
+        "pointerEvents:none",
+        "zIndex:1",
+      ].join(";");
+      pill.textContent = score;
+      // fc-daygrid-day has position:relative already
+      cell.style.position = "relative";
+      cell.appendChild(pill);
+    }
+  }
+
   function tryInit() {
     if (!window._fcLoaded) return;
     var el = document.getElementById("fc-container");
@@ -210,12 +251,15 @@
 
     var events = [];
     var raw = [];
+    var sleepData = {};
     var initialDate = null;
     try {
       events = JSON.parse(eventsEl.textContent);
       raw = JSON.parse(rawEl.textContent);
       var initEl = document.getElementById("fc-initial-date");
       if (initEl) initialDate = JSON.parse(initEl.textContent);
+      var sleepEl = document.getElementById("fc-sleep-data");
+      if (sleepEl) sleepData = JSON.parse(sleepEl.textContent);
     } catch (e) {
       return;
     }
@@ -243,7 +287,10 @@
       themeSystem: "standard",
       datesSet: function (info) {
         window._fcCurrentMonth = info.view.currentStart.toISOString().slice(0, 10);
-        setTimeout(function () { injectSummaryRows(raw); }, 0);
+        setTimeout(function () {
+          injectSummaryRows(raw);
+          injectSleepScores(sleepData);
+        }, 0);
       },
     };
     if (initialDate) calOpts.initialDate = initialDate;
