@@ -30,6 +30,10 @@ env/
 # IDE
 .vscode/
 
+# Secrets
+.env
+.env.*
+
 # Tool config
 .python-version
 pyrightconfig.json
