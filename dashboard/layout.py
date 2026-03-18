@@ -40,25 +40,6 @@ def create_layout():
                         value="calendar",
                         children=[
                             dcc.Tab(
-                                label="Upload",
-                                value="upload",
-                                style={
-                                    "padding": "6px 20px",
-                                    "lineHeight": "28px",
-                                    "display": "flex",
-                                    "alignItems": "center",
-                                    "justifyContent": "center",
-                                },
-                                selected_style={
-                                    "padding": "6px 20px",
-                                    "lineHeight": "28px",
-                                    "display": "flex",
-                                    "alignItems": "center",
-                                    "justifyContent": "center",
-                                    "borderTop": f"2px solid {COLORS['accent']}",
-                                },
-                            ),
-                            dcc.Tab(
                                 label="Calendar",
                                 value="calendar",
                                 style={
