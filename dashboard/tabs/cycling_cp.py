@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 from plotly.subplots import make_subplots
 
 from backend.cycling_processor import CyclingProcessor
@@ -58,10 +58,9 @@ def cycling_cp_layout():
     Output("cp-results", "children"),
     Output("cp-chart", "figure"),
     Input("cp-period", "value"),
-    State("user-store", "data"),
 )
-def update_cp_model(period, user_data):
-    cp = CyclingProcessor(user_id=get_user_id(user_data))
+def update_cp_model(period):
+    cp = CyclingProcessor(user_id=get_user_id())
     period_months = int(period)
     result = cp.estimate_critical_power(period_months)
 
@@ -254,10 +253,9 @@ def update_cp_model(period, user_data):
 @callback(
     Output("cp-over-time-chart", "figure"),
     Input("cp-period", "value"),
-    State("user-store", "data"),
 )
-def update_cp_over_time(period, user_data):
-    processor = CyclingProcessor(user_id=get_user_id(user_data))
+def update_cp_over_time(period):
+    processor = CyclingProcessor(user_id=get_user_id())
     data = processor.cp_over_time(period_months=int(period))
 
     fig = make_subplots(

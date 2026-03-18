@@ -712,12 +712,11 @@ def weights_tab(user_id=None):
     Output("weights-entry-container", "style"),
     Output("wt-date", "date"),
     Input("weights-subtabs", "value"),
-    State("user-store", "data"),
 )
-def render_weights_subtab(subtab, user_data):
+def render_weights_subtab(subtab):
     hide = {"display": "none"}
     show = {"display": "block"}
-    uid = get_user_id(user_data)
+    uid = get_user_id()
     if subtab == "pr":
         return hide, show, hide, hide, no_update
     if subtab == "session":
@@ -731,9 +730,8 @@ def render_weights_subtab(subtab, user_data):
 @callback(
     Output("exercise-progress-table", "children"),
     Input("exercise-select", "value"),
-    State("user-store", "data"),
 )
-def update_exercise_progress(selected, user_data):
+def update_exercise_progress(selected):
     if not selected:
         return html.Div(
             "Select an exercise to see progress",
@@ -743,7 +741,7 @@ def update_exercise_progress(selected, user_data):
     if isinstance(selected, str):
         selected = [selected]
 
-    data = _load_data(get_user_id(user_data))
+    data = _load_data(get_user_id())
 
     # Build {exercise_name: [(date, volume, max_weight), ...]} sorted by date
     exercise_data = {}
@@ -959,15 +957,14 @@ def update_exercise_progress(selected, user_data):
 @callback(
     Output("workout-detail-content", "children"),
     Input("workout-selector", "value"),
-    State("user-store", "data"),
 )
-def update_workout_detail(selected_index, user_data):
+def update_workout_detail(selected_index):
     if selected_index is None:
         return html.Div(
             "Select a workout to view details.", style={"color": COLORS["muted"]}
         )
 
-    data = _load_data(get_user_id(user_data))
+    data = _load_data(get_user_id())
     sorted_data = sorted(data, key=lambda x: x["date"], reverse=True)
 
     if selected_index < 0 or selected_index >= len(sorted_data):
@@ -1114,7 +1111,6 @@ def _render_sets(sets):
     State("wt-sets-store", "data"),
     State("wt-date", "date"),
     State("wt-body-weight", "value"),
-    State("user-store", "data"),
     prevent_initial_call=True,
 )
 def handle_workout(
@@ -1127,9 +1123,8 @@ def handle_workout(
     sets,
     workout_date,
     body_weight,
-    user_data,
 ):
-    uid = get_user_id(user_data)
+    uid = get_user_id()
     triggered = ctx.triggered_id
     click_map = {
         "wt-add-exercise": add_ex_clicks,

@@ -1,6 +1,6 @@
 import plotly.graph_objects as go
 import polars as pl
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
 from backend.hiking_processor import HikingProcessor
 from ..config import CARD_STYLE, COLORS, get_user_id
@@ -140,13 +140,12 @@ def hiking_tab():
     Output("hiking-session-dropdown", "value"),
     Output("hiking-trends-chart", "figure"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_hiking_overview(tab, user_data):
+def update_hiking_overview(tab):
     if tab != "hiking":
         return [], [], None, go.Figure()
 
-    hp = HikingProcessor(user_id=get_user_id(user_data))
+    hp = HikingProcessor(user_id=get_user_id())
 
     if hp.hiking.is_empty():
         return (
@@ -219,16 +218,15 @@ def update_hiking_overview(tab, user_data):
     Output("hiking-source-file", "data"),
     Output("hiking-map-section", "style"),
     Input("hiking-session-dropdown", "value"),
-    State("user-store", "data"),
 )
-def update_hiking_session(source_file, user_data):
+def update_hiking_session(source_file):
     hidden = {"display": "none"}
     visible = {}
 
     if not source_file:
         return [], None, hidden
 
-    hp = HikingProcessor(user_id=get_user_id(user_data))
+    hp = HikingProcessor(user_id=get_user_id())
     if hp.hiking.is_empty():
         return [], None, hidden
 
@@ -291,9 +289,8 @@ def update_hiking_session(source_file, user_data):
     Output("hiking-route-map", "figure"),
     Input("hiking-source-file", "data"),
     Input("hiking-map-mode", "value"),
-    State("user-store", "data"),
 )
-def update_hiking_route_map(source_file, color_mode, user_data):
+def update_hiking_route_map(source_file, color_mode):
     fig = go.Figure()
 
     if not source_file:
@@ -305,7 +302,7 @@ def update_hiking_route_map(source_file, color_mode, user_data):
         )
         return fig
 
-    hp = HikingProcessor(user_id=get_user_id(user_data))
+    hp = HikingProcessor(user_id=get_user_id())
     route = hp.get_hike_route(source_file)
 
     if not route["lat"]:

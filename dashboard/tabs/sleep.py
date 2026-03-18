@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
 from backend.sleep_processor import SleepProcessor
 from ..config import CARD_STYLE, COLORS, get_user_id
@@ -246,13 +246,12 @@ def sleep_tab():
     Output("sleep-summary-cards", "children"),
     Output("sleep-score-cards", "children"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_sleep_overview(tab, user_data):
+def update_sleep_overview(tab):
     if tab != "sleep":
         return [], []
 
-    sp = SleepProcessor(user_id=get_user_id(user_data))
+    sp = SleepProcessor(user_id=get_user_id())
 
     if sp.sleep.is_empty():
         empty = html.Div("No sleep data found.", style={"color": COLORS["muted"]})
@@ -366,9 +365,8 @@ def update_sleep_overview(tab, user_data):
     Input("tabs", "value"),
     Input("sleep-metric-picker", "value"),
     Input("sleep-window-picker", "value"),
-    State("user-store", "data"),
 )
-def update_sleep_trend(tab, metric, window_days, user_data):
+def update_sleep_trend(tab, metric, window_days):
     fig = go.Figure()
     fig.update_layout(
         paper_bgcolor=COLORS["bg"],
@@ -383,7 +381,7 @@ def update_sleep_trend(tab, metric, window_days, user_data):
     if tab != "sleep":
         return fig
 
-    sp = SleepProcessor(user_id=get_user_id(user_data))
+    sp = SleepProcessor(user_id=get_user_id())
     df = sp.chart_data(metric)
     if df.is_empty():
         return fig
@@ -439,9 +437,8 @@ def update_sleep_trend(tab, metric, window_days, user_data):
     Output("sleep-stage-chart", "figure"),
     Input("tabs", "value"),
     Input("sleep-window-picker", "value"),
-    State("user-store", "data"),
 )
-def update_sleep_stages(tab, window_days, user_data):
+def update_sleep_stages(tab, window_days):
     fig = go.Figure()
     fig.update_layout(
         paper_bgcolor=COLORS["bg"],
@@ -468,7 +465,7 @@ def update_sleep_stages(tab, window_days, user_data):
     if tab != "sleep":
         return fig
 
-    sp = SleepProcessor(user_id=get_user_id(user_data))
+    sp = SleepProcessor(user_id=get_user_id())
     df = sp.stage_breakdown_data()
     if df.is_empty():
         return fig

@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
 from backend.skiing_processor import skiing
 from ..config import CARD_STYLE, COLORS, get_user_id
@@ -163,13 +163,12 @@ def skiing_tab():
     Output("skiing-season-dropdown", "options"),
     Output("skiing-season-dropdown", "value"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_skiing_overview(tab, user_data):
+def update_skiing_overview(tab):
     if tab != "Ski":
         return [], [], None
 
-    sp = skiing(user_id=get_user_id(user_data))
+    sp = skiing(user_id=get_user_id())
     if sp.skiing.is_empty():
         return (
             [html.Div("No skiing data found.", style={"color": COLORS["muted"]})],
@@ -209,13 +208,12 @@ def update_skiing_overview(tab, user_data):
     Output("skiing-session-dropdown", "options"),
     Output("skiing-session-dropdown", "value"),
     Input("skiing-season-dropdown", "value"),
-    State("user-store", "data"),
 )
-def update_skiing_season(season_value, user_data):
+def update_skiing_season(season_value):
     if not season_value:
         return [], [], None
 
-    sp = skiing(user_id=get_user_id(user_data))
+    sp = skiing(user_id=get_user_id())
     if sp.skiing.is_empty():
         return [], [], None
 
@@ -276,16 +274,15 @@ def update_skiing_season(season_value, user_data):
     Output("skiing-source-file", "data"),
     Output("skiing-map-section", "style"),
     Input("skiing-session-dropdown", "value"),
-    State("user-store", "data"),
 )
-def update_skiing_session(source_file, user_data):
+def update_skiing_session(source_file):
     hidden = {"display": "none"}
     visible = {}
 
     if not source_file:
         return [], None, hidden
 
-    sp = skiing(user_id=get_user_id(user_data))
+    sp = skiing(user_id=get_user_id())
     if sp.skiing.is_empty():
         return [], None, hidden
 
@@ -353,9 +350,8 @@ def update_skiing_session(source_file, user_data):
     Output("skiing-route-map", "figure"),
     Input("skiing-source-file", "data"),
     Input("skiing-map-mode", "value"),
-    State("user-store", "data"),
 )
-def update_skiing_route_map(source_file, color_mode, user_data):
+def update_skiing_route_map(source_file, color_mode):
     fig = go.Figure()
     base_layout = {
         "paper_bgcolor": "rgba(0,0,0,0)",
@@ -369,7 +365,7 @@ def update_skiing_route_map(source_file, color_mode, user_data):
         fig.update_layout(**base_layout)
         return fig
 
-    sp = skiing(user_id=get_user_id(user_data))
+    sp = skiing(user_id=get_user_id())
     route = sp.get_ski_route(source_file)
 
     if not route["lat"]:

@@ -1,4 +1,4 @@
-from dash import dcc, html
+from dash import html
 
 from .config import COLORS
 
@@ -11,11 +11,6 @@ def create_layout():
             "color": COLORS["text"],
         },
         children=[
-            # ── Auth primitives ───────────────────────────────────────────────
-            # dcc.Store persists the authenticated user across callbacks.
-            # storage_type="session" means it clears when the browser tab closes.
-            dcc.Store(id="user-store", storage_type="session"),
-            # ── Nav bar + tab content (hidden until authenticated) ────────────
             html.Div(
                 style={
                     "backgroundColor": COLORS["card"],

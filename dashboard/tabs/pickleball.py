@@ -1,5 +1,5 @@
 import polars as pl
-from dash import Input, Output, State, callback, dash_table, html
+from dash import Input, Output, callback, dash_table, html
 
 from backend.schemas import load_sessions
 from backend.storage import storage
@@ -104,13 +104,12 @@ def pickleball_tab():
     Output("pickleball-summary-cards", "children"),
     Output("pickleball-session-list", "children"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_pickleball_overview(tab, user_data):
+def update_pickleball_overview(tab):
     if tab != "pickleball":
         return [], []
 
-    df = _load_pickleball(user_id=get_user_id(user_data))
+    df = _load_pickleball(user_id=get_user_id())
 
     if df.is_empty():
         return [

@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dash_table, dcc, html
+from dash import Input, Output, callback, dash_table, dcc, html
 from plotly.subplots import make_subplots
 
 from backend.SportSummarizer import SportSummarizer
@@ -99,10 +99,9 @@ def sports_tab():
 @callback(
     Output("sport-summary-cards", "children"),
     Input("sport-group-by", "value"),  # trigger on load
-    State("user-store", "data"),
 )
-def update_summary_cards(_group_by, user_data):
-    ss = SportSummarizer(user_id=get_user_id(user_data))
+def update_summary_cards(_group_by):
+    ss = SportSummarizer(user_id=get_user_id())
     stats = ss.get_summary_stats()
 
     cards = [
@@ -129,10 +128,9 @@ def update_summary_cards(_group_by, user_data):
 @callback(
     Output("sport-total-chart", "figure"),
     Input("sport-group-by", "value"),
-    State("user-store", "data"),
 )
-def update_total_chart(group_by, user_data):
-    ss = SportSummarizer(user_id=get_user_id(user_data))
+def update_total_chart(group_by):
+    ss = SportSummarizer(user_id=get_user_id())
     data = ss.get_chart_data(group_by=group_by)
 
     if not data:
@@ -185,10 +183,9 @@ def update_total_chart(group_by, user_data):
 @callback(
     Output("sport-chart", "figure"),
     Input("sport-group-by", "value"),
-    State("user-store", "data"),
 )
-def update_sport_chart(group_by, user_data):
-    ss = SportSummarizer(user_id=get_user_id(user_data))
+def update_sport_chart(group_by):
+    ss = SportSummarizer(user_id=get_user_id())
     data = ss.get_chart_data(group_by=group_by)
 
     if not data:
@@ -273,10 +270,9 @@ def update_sport_chart(group_by, user_data):
 @callback(
     Output("sport-summary-table", "children"),
     Input("sport-group-by", "value"),
-    State("user-store", "data"),
 )
-def update_sport_summary(group_by, user_data):
-    ss = SportSummarizer(user_id=get_user_id(user_data))
+def update_sport_summary(group_by):
+    ss = SportSummarizer(user_id=get_user_id())
     df = ss.summarize_hours_by_sport(group_by=group_by)
 
     if df is None or df.is_empty():

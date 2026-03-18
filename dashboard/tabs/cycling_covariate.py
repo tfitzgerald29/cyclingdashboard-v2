@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
 from backend.cycling_processor import CyclingProcessor
 
@@ -58,11 +58,10 @@ def cycling_covariate_layout():
     Output("cp-covariate-results", "children"),
     Output("cp-covariate-chart", "figure"),
     Input("cp-sleep-toggle", "value"),
-    State("user-store", "data"),
 )
-def update_cp_covariates(sleep_toggle, user_data):
+def update_cp_covariates(sleep_toggle):
     include_sleep = sleep_toggle == "on"
-    processor = CyclingProcessor(user_id=get_user_id(user_data))
+    processor = CyclingProcessor(user_id=get_user_id())
     result = processor.cp_covariate_analysis(include_sleep=include_sleep)
 
     empty_fig = go.Figure()

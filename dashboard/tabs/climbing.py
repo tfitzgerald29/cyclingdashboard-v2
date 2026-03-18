@@ -1,6 +1,6 @@
 import plotly.graph_objects as go
 import polars as pl
-from dash import Input, Output, State, callback, dash_table, dcc, html
+from dash import Input, Output, callback, dash_table, dcc, html
 
 from backend.schemas import load_sessions, load_splits, load_split_summaries
 from backend.storage import storage
@@ -128,13 +128,12 @@ def climbing_tab():
     Output("climbing-session-dropdown", "value"),
     Output("climbing-trends-chart", "figure"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_climbing_overview(tab, user_data):
+def update_climbing_overview(tab):
     if tab != "climbing":
         return [], [], None, go.Figure()
 
-    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id(user_data))
+    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id())
 
     if sessions.is_empty():
         return (
@@ -262,13 +261,12 @@ def update_climbing_overview(tab, user_data):
 @callback(
     Output("climbing-session-detail", "children"),
     Input("climbing-session-dropdown", "value"),
-    State("user-store", "data"),
 )
-def update_climbing_session(source_file, user_data):
+def update_climbing_session(source_file):
     if not source_file:
         return []
 
-    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id(user_data))
+    sessions, splits, _summaries = _load_climbing_data(user_id=get_user_id())
     if sessions.is_empty():
         return []
 

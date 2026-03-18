@@ -1,5 +1,5 @@
 import polars as pl
-from dash import Input, Output, State, callback, html
+from dash import Input, Output, callback, html
 
 from backend.running_processor import RunningProcessor
 from ..config import CARD_STYLE, COLORS, get_user_id
@@ -83,13 +83,12 @@ def running_tab():
     Output("running-summary-cards", "children"),
     Output("running-session-list", "children"),
     Input("tabs", "value"),
-    State("user-store", "data"),
 )
-def update_running_overview(tab, user_data):
+def update_running_overview(tab):
     if tab != "running":
         return [], []
 
-    rp = RunningProcessor(user_id=get_user_id(user_data))
+    rp = RunningProcessor(user_id=get_user_id())
 
     if rp.running.is_empty():
         return [

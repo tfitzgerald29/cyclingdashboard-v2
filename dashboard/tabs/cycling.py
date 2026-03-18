@@ -1,6 +1,6 @@
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
-from ..config import COLORS, get_user_id
+from ..config import COLORS
 
 from .cycling_cp import cycling_cp_layout  # noqa: F401 (registers callbacks)
 from .cycling_covariate import cycling_covariate_layout  # noqa: F401 (registers callbacks)
@@ -81,18 +81,16 @@ def cycling_tab():
     Output("covariate-content", "children"),
     Output("covariate-content", "style"),
     Input("cycling-subtabs", "value"),
-    Input("user-store", "data"),
 )
-def render_cycling_subtab(subtab, user_data):
+def render_cycling_subtab(subtab):
     hide = {"display": "none"}
     show = {"display": "block"}
-    user_id = get_user_id(user_data)
     return (
         cycling_overview_layout() if subtab == "overview" else None,
         show if subtab == "overview" else hide,
         cycling_cp_layout() if subtab == "cp" else None,
         show if subtab == "cp" else hide,
-        cycling_rides_layout(user_id=user_id) if subtab == "rides" else None,
+        cycling_rides_layout() if subtab == "rides" else None,
         show if subtab == "rides" else hide,
         cycling_covariate_layout() if subtab == "covariate" else None,
         show if subtab == "covariate" else hide,
