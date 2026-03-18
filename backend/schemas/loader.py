@@ -121,16 +121,12 @@ def load_sessions(
             f"Unknown sport '{sport}'. Known sports: {list(_SPORT_FILTER.keys())}"
         )
 
-    if not storage.path_exists(parquet_path):
-        return pl.DataFrame()
-
     schema = _SESSION_SCHEMA[sport]
 
+    if not storage.path_exists(parquet_path):
+        return _coerce_df(pl.DataFrame(), schema, f"{sport}/session")
+
     df = storage.read_parquet(parquet_path).filter(pl.col("sport").is_in(sport_values))
-
-    if df.is_empty():
-        return df
-
     return _coerce_df(df, schema, f"{sport}/session")
 
 
@@ -161,10 +157,10 @@ def load_records(
     pl.DataFrame
         Schema-coerced record rows.
     """
-    if not storage.path_exists(parquet_path):
-        return pl.DataFrame()
-
     schema = _RECORD_SCHEMA.get(sport, RECORD_BASE)
+
+    if not storage.path_exists(parquet_path):
+        return _coerce_df(pl.DataFrame(), schema, f"{sport}/record")
 
     read_kwargs: dict = {}
     if columns is not None:
@@ -174,9 +170,6 @@ def load_records(
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))
-
-    if df.is_empty():
-        return df
 
     return _coerce_df(df, schema, f"{sport}/record")
 
@@ -195,15 +188,12 @@ def load_splits(
         If provided, filter to only these source files.
     """
     if not storage.path_exists(parquet_path):
-        return pl.DataFrame()
+        return _coerce_df(pl.DataFrame(), SPLIT_BASE, "split")
 
     df = storage.read_parquet(parquet_path)
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))
-
-    if df.is_empty():
-        return df
 
     return _coerce_df(df, SPLIT_BASE, "split")
 
@@ -214,14 +204,11 @@ def load_split_summaries(
 ) -> pl.DataFrame:
     """Load and schema-coerce split_summary_mesgs from *parquet_path*."""
     if not storage.path_exists(parquet_path):
-        return pl.DataFrame()
+        return _coerce_df(pl.DataFrame(), SPLIT_SUMMARY_BASE, "split_summary")
 
     df = storage.read_parquet(parquet_path)
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))
-
-    if df.is_empty():
-        return df
 
     return _coerce_df(df, SPLIT_SUMMARY_BASE, "split_summary")

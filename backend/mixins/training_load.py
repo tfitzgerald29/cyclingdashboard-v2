@@ -7,6 +7,71 @@ import polars as pl
 class TrainingLoadMixin:
     """Cycling summary, daily TSS, CTL/ATL/TSB, forecast, and training load plot."""
 
+    @staticmethod
+    def _empty_daily_tss() -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "date": pl.Series([], dtype=pl.Date),
+                "tss": pl.Series([], dtype=pl.Float64),
+                "is_projection": pl.Series([], dtype=pl.Boolean),
+            }
+        )
+
+    @staticmethod
+    def _empty_ctl_atl() -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "date": pl.Series([], dtype=pl.Date),
+                "tss": pl.Series([], dtype=pl.Float64),
+                "is_projection": pl.Series([], dtype=pl.Boolean),
+                "ctl": pl.Series([], dtype=pl.Float64),
+                "atl": pl.Series([], dtype=pl.Float64),
+                "tsb": pl.Series([], dtype=pl.Float64),
+            }
+        )
+
+    @staticmethod
+    def _empty_forecast() -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "date": pl.Series([], dtype=pl.Date),
+                "tss_forecast": pl.Series([], dtype=pl.Float64),
+                "is_projection": pl.Series([], dtype=pl.Boolean),
+                "ctl_forecast": pl.Series([], dtype=pl.Float64),
+                "atl_forecast": pl.Series([], dtype=pl.Float64),
+                "tsb_forecast": pl.Series([], dtype=pl.Float64),
+            }
+        )
+
+    @staticmethod
+    def _empty_training_load_figure() -> go.Figure:
+        fig = go.Figure()
+        fig.update_layout(
+            title="Training Load: CTL / ATL / TSB",
+            xaxis_title="Date",
+            yaxis=dict(title="CTL / ATL / TSB"),
+            yaxis2=dict(title="TSS", overlaying="y", side="right", showgrid=False),
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+            template="plotly_white",
+            width=1400,
+            height=700,
+            annotations=[
+                {
+                    "text": "No cycling data",
+                    "showarrow": False,
+                    "xref": "paper",
+                    "yref": "paper",
+                    "x": 0.5,
+                    "y": 0.5,
+                    "font": {"size": 14, "color": "#888"},
+                }
+            ],
+        )
+        return fig
+
     def summarize_cycling(self, group_by="year") -> pl.DataFrame:
         """Summarize cycling rides by year, month, or week with rides, miles, time, and TSS."""
         df = self.cycling.clone()
@@ -60,31 +125,63 @@ class TrainingLoadMixin:
         return summary.select(select_cols).sort(group_cols)
 
     def compute_daily_tss(self) -> pl.DataFrame:
-        if self.cycling.is_empty():
-            return pl.DataFrame()
-        df = self.cycling.with_columns(
+        if self.cycling.is_empty() or "timestamp" not in self.cycling.columns:
+            return self._empty_daily_tss()
+
+        df = self.cycling
+        ts_dtype = df["timestamp"].dtype
+        if getattr(ts_dtype, "time_zone", None) is None:
+            df = df.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+
+        fallback_cols = {
+            "total_timer_time",
+            "normalized_power",
+            "intensity_factor",
+            "threshold_power",
+        }
+        has_training_stress_score = "training_stress_score" in df.columns
+        has_fallback = fallback_cols.issubset(df.columns)
+
+        fallback_tss = (
+            (
+                pl.col("total_timer_time")
+                * pl.col("normalized_power")
+                * pl.col("intensity_factor")
+            )
+            / (pl.col("threshold_power") * 3600)
+            * 100
+        )
+
+        if has_training_stress_score and has_fallback:
+            tss_expr = (
+                pl.when(pl.col("training_stress_score").is_not_null())
+                .then(pl.col("training_stress_score"))
+                .otherwise(fallback_tss)
+                .alias("tss")
+            )
+        elif has_training_stress_score:
+            tss_expr = pl.col("training_stress_score").alias("tss")
+        elif has_fallback:
+            tss_expr = fallback_tss.alias("tss")
+        else:
+            return self._empty_daily_tss()
+
+        df = df.with_columns(
             pl.col("timestamp")
             .dt.convert_time_zone("America/Denver")
             .dt.date()
             .alias("date"),
-            pl.when(pl.col("training_stress_score").is_not_null())
-            .then(pl.col("training_stress_score"))
-            .otherwise(
-                (
-                    pl.col("total_timer_time")
-                    * pl.col("normalized_power")
-                    * pl.col("intensity_factor")
-                )
-                / (pl.col("threshold_power") * 3600)
-                * 100
-            )
-            .alias("tss"),
+            tss_expr,
         )
 
         daily_tss = df.group_by("date").agg(pl.col("tss").sum()).sort("date")
+        if daily_tss.is_empty() or "date" not in daily_tss.columns:
+            return self._empty_daily_tss()
 
         # Expand to full date range + 60-day projection, filling gaps with 0
         min_date = daily_tss["date"].min()
+        if min_date is None:
+            return self._empty_daily_tss()
         today = date.today()
         projection_end = today + timedelta(days=60)
 
@@ -97,10 +194,12 @@ class TrainingLoadMixin:
             (pl.col("date") > today).alias("is_projection"),
         )
 
-        return daily_tss
+        return daily_tss.select("date", "tss", "is_projection")
 
     def compute_ctl_atl(self, ctl_days: int = 42, atl_days: int = 7) -> pl.DataFrame:
         daily_tss = self.compute_daily_tss()
+        if daily_tss.is_empty() or "tss" not in daily_tss.columns:
+            return self._empty_ctl_atl()
 
         ctl_decay = 2.0 / (ctl_days + 1)
         atl_decay = 2.0 / (atl_days + 1)
@@ -122,17 +221,21 @@ class TrainingLoadMixin:
             pl.Series("ctl", ctl_values),
             pl.Series("atl", atl_values),
             (pl.Series("ctl", ctl_values) - pl.Series("atl", atl_values)).alias("tsb"),
-        )
+        ).select("date", "tss", "is_projection", "ctl", "atl", "tsb")
 
     def compute_ctl_atl_forecast(
         self, ctl_days: int = 42, atl_days: int = 7, lookback_days: int = 42
     ) -> pl.DataFrame:
         daily_tss = self.compute_daily_tss()
+        if daily_tss.is_empty() or "tss" not in daily_tss.columns:
+            return self._empty_forecast()
 
         # Calculate average daily TSS from the last N actual (non-projection) days
         actual = daily_tss.filter(~pl.col("is_projection"))
         recent = actual.tail(lookback_days)
         avg_tss = recent["tss"].mean()
+        if avg_tss is None:
+            avg_tss = 0.0
 
         # Replace projection-day TSS with the historical average
         forecast_tss = daily_tss.with_columns(
@@ -174,6 +277,8 @@ class TrainingLoadMixin:
     ) -> go.Figure:
 
         df = self.compute_ctl_atl()
+        if df.is_empty() or "date" not in df.columns:
+            return self._empty_training_load_figure()
 
         if include_forecast:
             df_forecast = self.compute_ctl_atl_forecast()
@@ -184,6 +289,9 @@ class TrainingLoadMixin:
             df = df.filter(pl.col("date") >= start_date)
             if include_forecast:
                 df_forecast = df_forecast.filter(pl.col("date") >= start_date)
+
+        if df.is_empty():
+            return self._empty_training_load_figure()
 
         dates = df["date"].to_list()
         projection_start = df.filter(pl.col("is_projection"))["date"].min()
@@ -271,7 +379,7 @@ class TrainingLoadMixin:
             )
 
         # Projection shading
-        if projection_start is not None:
+        if projection_start is not None and len(dates) > 0:
             fig.add_vrect(
                 x0=projection_start,
                 x1=dates[-1],
