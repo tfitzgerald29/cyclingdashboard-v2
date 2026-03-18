@@ -181,12 +181,22 @@ class StorageConfig:
             if date_cfg is not None:
                 years, date_col, is_string = date_cfg
                 cutoff = date.today() - timedelta(days=years * 365)
-                if date_col in scan.collect_schema().names():
-                    predicate = (
-                        pl.col(date_col) >= str(cutoff)
-                        if is_string
-                        else pl.col(date_col).dt.date() >= cutoff
-                    )
+                schema = scan.collect_schema()
+                if date_col in schema.names():
+                    if is_string:
+                        predicate = pl.col(date_col) >= str(cutoff)
+                    else:
+                        col_dtype = schema[date_col]
+                        tz = getattr(col_dtype, "time_zone", None)
+                        if tz:
+                            # timezone-aware column: compare as UTC datetime
+                            from datetime import datetime
+
+                            cutoff_dt = datetime(cutoff.year, cutoff.month, cutoff.day)
+                            cutoff_lit = pl.lit(cutoff_dt).dt.replace_time_zone("UTC")
+                            predicate = pl.col(date_col) >= cutoff_lit
+                        else:
+                            predicate = pl.col(date_col).dt.date() >= cutoff
                     scan = scan.filter(predicate)
             df = scan.collect()
             return df

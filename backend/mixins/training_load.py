@@ -11,6 +11,9 @@ class TrainingLoadMixin:
         """Summarize cycling rides by year, month, or week with rides, miles, time, and TSS."""
         df = self.cycling.clone()
 
+        if df.is_empty():
+            return df
+
         timestamp_col = "timestamp"
         if df[timestamp_col].dtype.time_zone is None:
             df = df.with_columns(pl.col(timestamp_col).dt.replace_time_zone("UTC"))
@@ -57,6 +60,8 @@ class TrainingLoadMixin:
         return summary.select(select_cols).sort(group_cols)
 
     def compute_daily_tss(self) -> pl.DataFrame:
+        if self.cycling.is_empty():
+            return pl.DataFrame()
         df = self.cycling.with_columns(
             pl.col("timestamp")
             .dt.convert_time_zone("America/Denver")
