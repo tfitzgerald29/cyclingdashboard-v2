@@ -10,18 +10,6 @@ from backend.storage import storage
 from dashboard.layout import create_layout
 import dashboard.callbacks  # noqa: F401 - registers tab router + imports dashboard.tabs
 
-_in_reloader_parent = (
-    __name__ == "__main__" and os.environ.get("WERKZEUG_RUN_MAIN") != "true"
-)
-
-_fp = FitFileProcessor()
-if os.path.isdir(_fp.source_folder) and not _in_reloader_parent:
-    _fp.run()
-
-_sp = SleepProcessor()
-if os.path.isdir(_sp.source_folder) and not _in_reloader_parent:
-    _sp.run()
-
 # ── Dash app ──────────────────────────────────────────────────────────────────
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "Tyler's Activities"
@@ -38,6 +26,17 @@ PORT = 8051
 # a timer long enough for the child to bind the port.  The reloader child never
 # opens the browser, so reloads don't trigger extra tabs.
 if __name__ == "__main__":
+    _in_reloader_parent = (
+        __name__ == "__main__" and os.environ.get("WERKZEUG_RUN_MAIN") != "true"
+    )
+    _fp = FitFileProcessor()
+    if os.path.isdir(_fp.source_folder) and not _in_reloader_parent:
+        _fp.run()
+
+    _sp = SleepProcessor()
+    if os.path.isdir(_sp.source_folder) and not _in_reloader_parent:
+        _sp.run()
+
     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         threading.Timer(
             2.0, lambda: webbrowser.open(f"http://localhost:{PORT}")
