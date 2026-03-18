@@ -1,8 +1,8 @@
 import polars as pl
-from dash import Input, Output, callback, html
+from dash import Input, Output, State, callback, html
 
 from backend.running_processor import RunningProcessor
-from ..config import CARD_STYLE, COLORS, MERGED_PATH
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 ACCENT = "#E91E63"  # running pink
 
@@ -83,12 +83,13 @@ def running_tab():
     Output("running-summary-cards", "children"),
     Output("running-session-list", "children"),
     Input("tabs", "value"),
+    State("user-store", "data"),
 )
-def update_running_overview(tab):
+def update_running_overview(tab, user_data):
     if tab != "running":
         return [], []
 
-    rp = RunningProcessor(mergedfiles_path=MERGED_PATH)
+    rp = RunningProcessor(user_id=get_user_id(user_data))
 
     if rp.running.is_empty():
         return [

@@ -10,18 +10,16 @@ import os
 import polars as pl
 
 from .schemas import load_sessions
-
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_MERGED_PATH = os.path.join(_BASE_DIR, "mergedfiles")
+from .storage import storage
 
 
 class HikingProcessor:
-    def __init__(self, mergedfiles_path=None) -> None:
-        self.mergedfiles_path = mergedfiles_path or _DEFAULT_MERGED_PATH
+    def __init__(self, mergedfiles_path=None, user_id=None) -> None:
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
         self.hiking = self._load_hiking_sessions()
 
     def _load_hiking_sessions(self) -> pl.DataFrame:
-        parquet_path = os.path.join(self.mergedfiles_path, "session_mesgs.parquet")
+        parquet_path = storage.path_join(self.mergedfiles_path, "session_mesgs.parquet")
         df = load_sessions("hiking", parquet_path)
         if df.is_empty():
             return df
@@ -67,9 +65,9 @@ class HikingProcessor:
         elevation_ft is ``enhanced_altitude`` converted from metres to feet.
         heart_rate is the raw bpm series (None where missing).
         """
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
         empty: dict = {"lat": [], "lon": [], "elevation_ft": [], "heart_rate": []}
-        if not os.path.exists(records_path):
+        if not storage.path_exists(records_path):
             return empty
 
         SEMICIRCLES_TO_DEGREES = 180.0 / (2**31)

@@ -8,22 +8,24 @@ from garmin_fit_sdk import Decoder, Stream
 from .schemas import INGEST_COLUMNS
 from .schemas.base import RECORD_BASE, SESSION_BASE
 from .schemas import cycling, climbing, hiking, running, skiing
-
-TCX_NS = {"tcx": "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"}
+from .storage import storage
 
 
 class FitFileProcessor:
-    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DEFAULT_SOURCE_FOLDER = os.environ.get(
         "FIT_SOURCE_FOLDER", os.path.expanduser("~/Downloads")
     )
-    DEFAULT_PROCESSED_PATH = os.path.join(_BASE_DIR, "processedfiles")
-    DEFAULT_MERGED_PATH = os.path.join(_BASE_DIR, "mergedfiles")
 
-    def __init__(self, source_folder=None, processedpath=None, mergedfiles_path=None):
+    def __init__(
+        self,
+        source_folder=None,
+        processedpath=None,
+        mergedfiles_path=None,
+        user_id=None,
+    ):
         self.source_folder = source_folder or self.DEFAULT_SOURCE_FOLDER
-        self.processedpath = processedpath or self.DEFAULT_PROCESSED_PATH
-        self.mergedfiles_path = mergedfiles_path or self.DEFAULT_MERGED_PATH
+        self.processedpath = processedpath or storage.processed_path(user_id)
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
         self.inclusion_list = [
             "file_id_mesgs",
             "activity_mesgs",
@@ -38,7 +40,7 @@ class FitFileProcessor:
 
     def unzip_fit_files(self):
         # Ensure the processed path exists
-        os.makedirs(self.processedpath, exist_ok=True)
+        storage.makedirs(self.processedpath)
         new_fit_files = []
 
         with os.scandir(self.source_folder) as entries:
@@ -52,12 +54,12 @@ class FitFileProcessor:
                                 if file_info.filename.endswith(".fit"):
                                     # Extract directly to processedpath (flattens directory structure)
                                     fit_filename = os.path.basename(file_info.filename)
-                                    target_path = os.path.join(
+                                    target_path = storage.path_join(
                                         self.processedpath, fit_filename
                                     )
 
                                     # Skip if already extracted
-                                    if os.path.exists(target_path):
+                                    if storage.path_exists(target_path):
                                         continue
 
                                     with (
@@ -86,10 +88,12 @@ class FitFileProcessor:
         print(f"Checking for already processed files in: {self.mergedfiles_path}")
 
         for msg_type in self.inclusion_list:
-            parquet_path = os.path.join(self.mergedfiles_path, f"{msg_type}.parquet")
-            if os.path.exists(parquet_path):
+            parquet_path = storage.path_join(
+                self.mergedfiles_path, f"{msg_type}.parquet"
+            )
+            if storage.path_exists(parquet_path):
                 try:
-                    df = pl.read_parquet(parquet_path)
+                    df = storage.read_parquet(parquet_path)
                     print(
                         f"  ✓ {msg_type}.parquet loaded: {df.shape[0]} rows, {df.shape[1]} cols"
                     )
@@ -208,11 +212,13 @@ class FitFileProcessor:
         else:
             # On-disk parquet mode
             for mtype, known in self._SCHEMA_COLS.items():
-                path = os.path.join(self.mergedfiles_path, f"{mtype}.parquet")
-                if not os.path.exists(path):
+                path = storage.path_join(self.mergedfiles_path, f"{mtype}.parquet")
+                if not storage.path_exists(path):
                     continue
                 try:
-                    cols = set(pl.read_parquet(path, n_rows=0).columns)
+                    cols = set(
+                        pl.read_parquet(path, n_rows=0).columns
+                    )  # metadata only, not cached
                 except Exception as e:
                     print(
                         f"  [schema_drift] WARNING: could not read {mtype}.parquet: {e}"
@@ -284,12 +290,12 @@ class FitFileProcessor:
             f"\nProcessed {new_file_count} new files, skipped {skipped_count} already processed"
         )
 
-        os.makedirs(self.mergedfiles_path, exist_ok=True)
+        storage.makedirs(self.mergedfiles_path)
 
         if new_file_count > 0:
             print(f"\nUpdating Parquet files in: {self.mergedfiles_path}")
             for msg_type, data in data_by_type.items():
-                parquet_path = os.path.join(
+                parquet_path = storage.path_join(
                     self.mergedfiles_path, f"{msg_type}.parquet"
                 )
 
@@ -310,9 +316,9 @@ class FitFileProcessor:
                         # Check for columns not in any declared schema
                         self.check_schema_drift(df=new_df, msg_type=msg_type)
 
-                        if os.path.exists(parquet_path):
+                        if storage.path_exists(parquet_path):
                             try:
-                                existing_df = pl.read_parquet(parquet_path)
+                                existing_df = storage.read_parquet(parquet_path)
                                 existing_df, new_df = self.align_schemas(
                                     existing_df, new_df
                                 )
@@ -324,7 +330,7 @@ class FitFileProcessor:
                                     c for c in combined_df.columns if c != "source_file"
                                 ]
                                 combined_df = combined_df.unique(subset=dedup_cols)
-                                combined_df.write_parquet(parquet_path)
+                                storage.write_parquet(combined_df, parquet_path)
                                 print(
                                     f"✓ {msg_type}.parquet: Added {new_df.shape[0]} rows (total: {combined_df.shape[0]})"
                                 )
@@ -347,7 +353,7 @@ class FitFileProcessor:
                                 c for c in new_df.columns if c != "source_file"
                             ]
                             new_df = new_df.unique(subset=dedup_cols)
-                            new_df.write_parquet(parquet_path)
+                            storage.write_parquet(new_df, parquet_path)
                             print(
                                 f"✓ {msg_type}.parquet: Created with {new_df.shape[0]} rows"
                             )
@@ -356,7 +362,7 @@ class FitFileProcessor:
                         print(f"  ✗ Error creating DataFrame for {msg_type}: {e}")
                         continue
                 else:
-                    if not os.path.exists(parquet_path):
+                    if not storage.path_exists(parquet_path):
                         print(f"✗ {msg_type}: No data found")
         else:
             print("\nNo new files to process.")
@@ -390,14 +396,136 @@ class FitFileProcessor:
             "processing_error_files": processing_error_files,
         }
 
+    def process_uploaded_file(self, filename: str, content: bytes) -> dict:
+        """Process a single uploaded FIT or ZIP file delivered as raw bytes.
+
+        Used by the cloud upload callback where files arrive via dcc.Upload
+        as base64-decoded bytes rather than as paths on disk.
+
+        For ZIP files, each .fit entry inside is extracted and processed.
+        For .fit files, the bytes are decoded directly via Stream.from_byte_array.
+
+        Returns the same summary dict as process_new_fit_files().
+        """
+        import io
+
+        fit_files: list[tuple[str, bytes]] = []  # (filename, bytes) pairs
+
+        if filename.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    for info in zf.filelist:
+                        if info.filename.lower().endswith(".fit"):
+                            fit_name = os.path.basename(info.filename)
+                            fit_files.append((fit_name, zf.read(info.filename)))
+            except Exception as e:
+                return {
+                    "new_files_processed": 0,
+                    "skipped_already_processed": 0,
+                    "schema_mismatch_files": [],
+                    "processing_error_files": [{"file": filename, "error": str(e)}],
+                }
+        elif filename.lower().endswith(".fit"):
+            fit_files = [(filename, content)]
+        else:
+            return {
+                "new_files_processed": 0,
+                "skipped_already_processed": 0,
+                "schema_mismatch_files": [],
+                "processing_error_files": [
+                    {"file": filename, "error": "unsupported file type"}
+                ],
+            }
+
+        already_processed = self.get_processed_files()
+        data_by_type = {msg_type: [] for msg_type in self.inclusion_list}
+        new_file_count = 0
+        schema_mismatch_files = []
+        processing_error_files = []
+
+        for fit_name, fit_bytes in fit_files:
+            try:
+                stream = Stream.from_byte_array(fit_bytes)
+                decoder = Decoder(stream)
+                messages, errors = decoder.read()
+
+                if errors:
+                    print(f"  Warnings/Errors in {fit_name}: {len(errors)}")
+
+                new_file_count += 1
+                for msg_type in self.inclusion_list:
+                    if fit_name in already_processed[msg_type]:
+                        print(f"  Skipping {fit_name} ({msg_type}) — already processed")
+                        continue
+                    if msg_type in messages:
+                        for msg in messages[msg_type]:
+                            filtered_msg = {
+                                key: float(value) if isinstance(value, int) else value
+                                for key, value in msg.items()
+                                if isinstance(key, str)
+                                and not isinstance(value, (list, dict))
+                            }
+                            filtered_msg["source_file"] = fit_name
+                            data_by_type[msg_type].append(filtered_msg)
+
+            except Exception as e:
+                print(f"  Error processing {fit_name}: {e}")
+                processing_error_files.append({"file": fit_name, "error": str(e)})
+                continue
+
+        storage.makedirs(self.mergedfiles_path)
+
+        for msg_type, data in data_by_type.items():
+            if not data:
+                continue
+            parquet_path = storage.path_join(
+                self.mergedfiles_path, f"{msg_type}.parquet"
+            )
+            try:
+                if msg_type in self.expected_columns:
+                    expected = self.expected_columns[msg_type]
+                    for row in data:
+                        for col in expected:
+                            row.setdefault(col, None)
+
+                new_df = pl.DataFrame(data, infer_schema_length=None)
+                self.check_schema_drift(df=new_df, msg_type=msg_type)
+
+                if storage.path_exists(parquet_path):
+                    existing_df = storage.read_parquet(parquet_path)
+                    existing_df, new_df = self.align_schemas(existing_df, new_df)
+                    combined_df = pl.concat(
+                        [existing_df, new_df], how="diagonal_relaxed"
+                    )
+                    dedup_cols = [c for c in combined_df.columns if c != "source_file"]
+                    combined_df = combined_df.unique(subset=dedup_cols)
+                    storage.write_parquet(combined_df, parquet_path)
+                else:
+                    dedup_cols = [c for c in new_df.columns if c != "source_file"]
+                    new_df = new_df.unique(subset=dedup_cols)
+                    storage.write_parquet(new_df, parquet_path)
+
+            except Exception as e:
+                print(f"  ✗ Failed to merge {msg_type}: {e}")
+                schema_mismatch_files.append(
+                    {"file": fit_name, "msg_type": msg_type, "error": str(e)}
+                )
+
+        return {
+            "new_files_processed": new_file_count,
+            "skipped_already_processed": 0,
+            "schema_mismatch_files": schema_mismatch_files,
+            "processing_error_files": processing_error_files,
+        }
+
     def run(self):
         print("=" * 60)
         print("Starting Incremental FIT File Processing Pipeline")
         print("=" * 60)
 
         # Ensure directories exist
-        os.makedirs(self.processedpath, exist_ok=True)
-        os.makedirs(self.mergedfiles_path, exist_ok=True)
+        storage.makedirs(self.processedpath)
+        storage.makedirs(self.mergedfiles_path)
 
         # Step 1: Unzip new files to processedpath (returns list of files)
         print("\n[Step 1] Unzipping files...")
@@ -435,14 +563,16 @@ class FitFileProcessor:
 
         # Remove existing merged parquets
         for msg_type in self.inclusion_list:
-            parquet_path = os.path.join(self.mergedfiles_path, f"{msg_type}.parquet")
-            if os.path.exists(parquet_path):
+            parquet_path = storage.path_join(
+                self.mergedfiles_path, f"{msg_type}.parquet"
+            )
+            if storage.path_exists(parquet_path):
                 os.remove(parquet_path)
                 print(f"  Removed {msg_type}.parquet")
 
         # Get all FIT files from processedfiles
         all_fit_files = [
-            os.path.join(self.processedpath, f)
+            storage.path_join(self.processedpath, f)
             for f in os.listdir(self.processedpath)
             if f.endswith(".fit")
         ]

@@ -15,6 +15,7 @@ import polars as pl
 
 from . import climbing, cycling, hiking, running, skiing
 from .base import RECORD_BASE, SPLIT_BASE, SPLIT_SUMMARY_BASE
+from ..storage import storage
 
 # ── Sport → FIT sport string(s) ──────────────────────────────────────────────
 
@@ -114,20 +115,18 @@ def load_sessions(
         correctly typed.  Returns an empty DataFrame if the file doesn't exist
         or the sport has no rows.
     """
-    import os
-
     sport_values = _SPORT_FILTER.get(sport)
     if sport_values is None:
         raise ValueError(
             f"Unknown sport '{sport}'. Known sports: {list(_SPORT_FILTER.keys())}"
         )
 
-    if not os.path.exists(parquet_path):
+    if not storage.path_exists(parquet_path):
         return pl.DataFrame()
 
     schema = _SESSION_SCHEMA[sport]
 
-    df = pl.read_parquet(parquet_path).filter(pl.col("sport").is_in(sport_values))
+    df = storage.read_parquet(parquet_path).filter(pl.col("sport").is_in(sport_values))
 
     if df.is_empty():
         return df
@@ -162,9 +161,7 @@ def load_records(
     pl.DataFrame
         Schema-coerced record rows.
     """
-    import os
-
-    if not os.path.exists(parquet_path):
+    if not storage.path_exists(parquet_path):
         return pl.DataFrame()
 
     schema = _RECORD_SCHEMA.get(sport, RECORD_BASE)
@@ -173,7 +170,7 @@ def load_records(
     if columns is not None:
         read_kwargs["columns"] = columns
 
-    df = pl.read_parquet(parquet_path, **read_kwargs)
+    df = storage.read_parquet(parquet_path, **read_kwargs)
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))
@@ -197,12 +194,10 @@ def load_splits(
     source_files:
         If provided, filter to only these source files.
     """
-    import os
-
-    if not os.path.exists(parquet_path):
+    if not storage.path_exists(parquet_path):
         return pl.DataFrame()
 
-    df = pl.read_parquet(parquet_path)
+    df = storage.read_parquet(parquet_path)
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))
@@ -218,12 +213,10 @@ def load_split_summaries(
     source_files: list[str] | None = None,
 ) -> pl.DataFrame:
     """Load and schema-coerce split_summary_mesgs from *parquet_path*."""
-    import os
-
-    if not os.path.exists(parquet_path):
+    if not storage.path_exists(parquet_path):
         return pl.DataFrame()
 
-    df = pl.read_parquet(parquet_path)
+    df = storage.read_parquet(parquet_path)
 
     if source_files is not None:
         df = df.filter(pl.col("source_file").is_in(source_files))

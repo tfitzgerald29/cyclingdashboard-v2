@@ -10,18 +10,16 @@ import os
 import polars as pl
 
 from .schemas import load_sessions
-
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_MERGED_PATH = os.path.join(_BASE_DIR, "mergedfiles")
+from .storage import storage
 
 
 class RunningProcessor:
-    def __init__(self, mergedfiles_path=None) -> None:
-        self.mergedfiles_path = mergedfiles_path or _DEFAULT_MERGED_PATH
+    def __init__(self, mergedfiles_path=None, user_id=None) -> None:
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
         self.running = self._load_running_sessions()
 
     def _load_running_sessions(self) -> pl.DataFrame:
-        parquet_path = os.path.join(self.mergedfiles_path, "session_mesgs.parquet")
+        parquet_path = storage.path_join(self.mergedfiles_path, "session_mesgs.parquet")
         df = load_sessions("running", parquet_path)
         if df.is_empty():
             return df

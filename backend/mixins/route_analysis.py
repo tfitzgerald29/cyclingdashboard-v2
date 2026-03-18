@@ -2,6 +2,8 @@ import os
 
 import polars as pl
 
+from ..storage import storage
+
 
 class RouteAnalysisMixin:
     """Elevation profile, climb detection, and GPS route data."""
@@ -15,8 +17,8 @@ class RouteAnalysisMixin:
         Returns {distance_mi: [], altitude_ft: [], grade_pct: [], grade_instant: []}.
         Grade is smoothed over a rolling window to reduce GPS noise.
         """
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
-        if not os.path.exists(records_path):
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
+        if not storage.path_exists(records_path):
             return {"distance_mi": [], "altitude_ft": [], "grade_pct": []}
 
         records = (
@@ -33,10 +35,14 @@ class RouteAnalysisMixin:
         if not has_alt or not has_dist:
             return {"distance_mi": [], "altitude_ft": [], "grade_pct": []}
 
-        df = records.select("distance", "enhanced_altitude").with_columns(
-            pl.col("distance").fill_null(strategy="forward"),
-            pl.col("enhanced_altitude").fill_null(strategy="forward"),
-        ).drop_nulls()  # drop any leading nulls that couldn't be forward-filled
+        df = (
+            records.select("distance", "enhanced_altitude")
+            .with_columns(
+                pl.col("distance").fill_null(strategy="forward"),
+                pl.col("enhanced_altitude").fill_null(strategy="forward"),
+            )
+            .drop_nulls()
+        )  # drop any leading nulls that couldn't be forward-filled
 
         if df.height < 2:
             return {"distance_mi": [], "altitude_ft": [], "grade_pct": []}
@@ -82,8 +88,8 @@ class RouteAnalysisMixin:
         Returns list of dicts with: start_mi, end_mi, distance_mi, elevation_gain_ft,
         avg_grade, max_grade, duration_s, vam (vertical meters/hour).
         """
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
-        if not os.path.exists(records_path):
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
+        if not storage.path_exists(records_path):
             return []
 
         records = (
@@ -103,11 +109,20 @@ class RouteAnalysisMixin:
 
         has_power = "power" in records.columns
         has_cadence = "cadence" in records.columns
-        cols = ["distance", "enhanced_altitude"] + (["timestamp"] if has_ts else []) + (["power"] if has_power else []) + (["cadence"] if has_cadence else [])
-        df = records.select(cols).with_columns(
-            pl.col("distance").fill_null(strategy="forward"),
-            pl.col("enhanced_altitude").fill_null(strategy="forward"),
-        ).drop_nulls(subset=["distance", "enhanced_altitude"])
+        cols = (
+            ["distance", "enhanced_altitude"]
+            + (["timestamp"] if has_ts else [])
+            + (["power"] if has_power else [])
+            + (["cadence"] if has_cadence else [])
+        )
+        df = (
+            records.select(cols)
+            .with_columns(
+                pl.col("distance").fill_null(strategy="forward"),
+                pl.col("enhanced_altitude").fill_null(strategy="forward"),
+            )
+            .drop_nulls(subset=["distance", "enhanced_altitude"])
+        )
 
         if df.height < 2:
             return []
@@ -115,8 +130,12 @@ class RouteAnalysisMixin:
         dist_m = df["distance"].to_list()
         alt_m = df["enhanced_altitude"].to_list()
         timestamps = df["timestamp"].to_list() if has_ts else None
-        power_list = df["power"].fill_null(0).cast(pl.Int64).to_list() if has_power else None
-        cadence_list = df["cadence"].fill_null(0).cast(pl.Int64).to_list() if has_cadence else None
+        power_list = (
+            df["power"].fill_null(0).cast(pl.Int64).to_list() if has_power else None
+        )
+        cadence_list = (
+            df["cadence"].fill_null(0).cast(pl.Int64).to_list() if has_cadence else None
+        )
 
         # Compute smoothed grade (same as elevation profile)
         grade = [0.0]
@@ -200,7 +219,9 @@ class RouteAnalysisMixin:
                         for j in range(30, len(seg_power)):
                             window_sum += seg_power[j] - seg_power[j - 30]
                             rolling.append(window_sum / 30)
-                        normalized_power = round((sum(r**4 for r in rolling) / len(rolling)) ** 0.25)
+                        normalized_power = round(
+                            (sum(r**4 for r in rolling) / len(rolling)) ** 0.25
+                        )
 
             # Cadence stats for the climb segment
             avg_cadence = None
@@ -210,19 +231,21 @@ class RouteAnalysisMixin:
                 if non_zero_cad:
                     avg_cadence = round(sum(non_zero_cad) / len(non_zero_cad))
 
-            climbs.append({
-                "start_mi": round(dist_m[start] / 1609.344, 2),
-                "end_mi": round(dist_m[end] / 1609.344, 2),
-                "distance_mi": round(seg_dist / 1609.344, 2),
-                "elevation_gain_ft": round(elev_gain * 3.28084),
-                "avg_grade": round(avg_grade, 1),
-                "max_grade": round(max_grade_val, 1),
-                "duration_s": duration_s,
-                "vam": vam,
-                "avg_power": avg_power,
-                "normalized_power": normalized_power,
-                "avg_cadence": avg_cadence,
-            })
+            climbs.append(
+                {
+                    "start_mi": round(dist_m[start] / 1609.344, 2),
+                    "end_mi": round(dist_m[end] / 1609.344, 2),
+                    "distance_mi": round(seg_dist / 1609.344, 2),
+                    "elevation_gain_ft": round(elev_gain * 3.28084),
+                    "avg_grade": round(avg_grade, 1),
+                    "max_grade": round(max_grade_val, 1),
+                    "duration_s": duration_s,
+                    "vam": vam,
+                    "avg_power": avg_power,
+                    "normalized_power": normalized_power,
+                    "avg_cadence": avg_cadence,
+                }
+            )
 
         # Sort by position along the route
         climbs.sort(key=lambda c: c["start_mi"])
@@ -230,8 +253,8 @@ class RouteAnalysisMixin:
 
     def get_ride_route(self, source_file: str) -> dict:
         """Return GPS route data for a ride: {lat: [], lon: [], power: [], elevation: []}."""
-        records_path = os.path.join(self.mergedfiles_path, "record_mesgs.parquet")
-        if not os.path.exists(records_path):
+        records_path = storage.path_join(self.mergedfiles_path, "record_mesgs.parquet")
+        if not storage.path_exists(records_path):
             return {"lat": [], "lon": [], "power": [], "elevation": []}
 
         records = (
@@ -250,6 +273,10 @@ class RouteAnalysisMixin:
         lat = (gps["position_lat"] * self.SEMICIRCLES_TO_DEGREES).to_list()
         lon = (gps["position_long"] * self.SEMICIRCLES_TO_DEGREES).to_list()
         power = gps["power"].fill_null(0).to_list() if "power" in gps.columns else []
-        elevation = gps["enhanced_altitude"].to_list() if "enhanced_altitude" in gps.columns else []
+        elevation = (
+            gps["enhanced_altitude"].to_list()
+            if "enhanced_altitude" in gps.columns
+            else []
+        )
 
         return {"lat": lat, "lon": lon, "power": power, "elevation": elevation}

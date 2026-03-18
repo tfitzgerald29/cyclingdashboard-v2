@@ -1,10 +1,10 @@
 import plotly.graph_objects as go
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html
 from plotly.subplots import make_subplots
 
 from backend.cycling_processor import CyclingProcessor
 
-from ..config import CARD_STYLE, COLORS
+from ..config import CARD_STYLE, COLORS, get_user_id
 
 
 def _fmt_ride_time(seconds):
@@ -106,8 +106,8 @@ def _nearest_idx(dist_list, target_mi):
     return best_idx
 
 
-def cycling_rides_layout():
-    cp = CyclingProcessor()
+def cycling_rides_layout(user_id=None):
+    cp = CyclingProcessor(user_id=user_id)
     ride_options = cp.list_rides()
     return html.Div(
         [
@@ -127,14 +127,15 @@ def cycling_rides_layout():
 @callback(
     Output("ride-detail-content", "children"),
     Input("ride-selector", "value"),
+    State("user-store", "data"),
 )
-def update_ride_detail(ride_ts):
+def update_ride_detail(ride_ts, user_data):
     if not ride_ts:
         return html.Div(
             "Select a ride to view details.", style={"color": COLORS["muted"]}
         )
 
-    cp = CyclingProcessor()
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
     s = cp.get_ride_summary(ride_ts)
     if not s:
         return html.Div("Ride not found.", style={"color": COLORS["muted"]})
@@ -314,9 +315,10 @@ def update_ride_detail(ride_ts):
     Output("power-curve-chart", "figure"),
     Input("ride-source-file", "data"),
     Input("power-curve-compare", "value"),
+    State("user-store", "data"),
 )
-def update_power_curve(source_file, compare_periods):
-    cp = CyclingProcessor()
+def update_power_curve(source_file, compare_periods, user_data):
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
 
     fig = go.Figure()
 
@@ -373,9 +375,10 @@ def update_power_curve(source_file, compare_periods):
     Output("wprime-stats", "children"),
     Output("wprime-balance-chart", "figure"),
     Input("ride-source-file", "data"),
+    State("user-store", "data"),
 )
-def update_wprime_balance(source_file):
-    cp = CyclingProcessor()
+def update_wprime_balance(source_file, user_data):
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
     data = cp.get_wprime_balance(source_file) if source_file else {}
     time_min = data.get("time_min", [])
     bal_kj = data.get("wprime_bal_kj", [])
@@ -559,12 +562,13 @@ def update_wprime_balance(source_file):
 @callback(
     Output("power-histogram-chart", "figure"),
     Input("ride-source-file", "data"),
+    State("user-store", "data"),
 )
-def update_power_histogram(source_file):
+def update_power_histogram(source_file, user_data):
     fig = go.Figure()
 
     if source_file:
-        cp = CyclingProcessor()
+        cp = CyclingProcessor(user_id=get_user_id(user_data))
         data = cp.get_power_histogram(source_file)
         if data["bins"]:
             fig.add_trace(
@@ -593,12 +597,13 @@ def update_power_histogram(source_file):
 @callback(
     Output("power-zone-chart", "figure"),
     Input("ride-source-file", "data"),
+    State("user-store", "data"),
 )
-def update_power_zone_chart(source_file):
+def update_power_zone_chart(source_file, user_data):
     fig = go.Figure()
 
     if source_file:
-        cp = CyclingProcessor()
+        cp = CyclingProcessor(user_id=get_user_id(user_data))
         data = cp.get_power_zone_distribution(source_file)
         if data["zones"]:
             labels = [
@@ -635,8 +640,9 @@ def update_power_zone_chart(source_file):
 @callback(
     Output("elevation-profile-chart", "figure"),
     Input("ride-source-file", "data"),
+    State("user-store", "data"),
 )
-def update_elevation_profile(source_file):
+def update_elevation_profile(source_file, user_data):
     fig = make_subplots(
         rows=3,
         cols=1,
@@ -647,7 +653,7 @@ def update_elevation_profile(source_file):
     )
 
     if source_file:
-        cp = CyclingProcessor()
+        cp = CyclingProcessor(user_id=get_user_id(user_data))
         data = cp.get_elevation_profile(source_file)
         if data["distance_mi"]:
             dist = data["distance_mi"]
@@ -785,12 +791,13 @@ def update_elevation_profile(source_file):
 @callback(
     Output("climbs-section", "children"),
     Input("ride-source-file", "data"),
+    State("user-store", "data"),
 )
-def update_climbs_section(source_file):
+def update_climbs_section(source_file, user_data):
     if not source_file:
         return []
 
-    cp = CyclingProcessor()
+    cp = CyclingProcessor(user_id=get_user_id(user_data))
     climbs = cp.detect_climbs(source_file)
     if not climbs:
         return []
@@ -870,12 +877,13 @@ def update_climbs_section(source_file):
     Output("route-map-chart", "figure"),
     Input("ride-source-file", "data"),
     Input("map-color-mode", "value"),
+    State("user-store", "data"),
 )
-def update_route_map(source_file, color_mode):
+def update_route_map(source_file, color_mode, user_data):
     fig = go.Figure()
 
     if source_file:
-        cp = CyclingProcessor()
+        cp = CyclingProcessor(user_id=get_user_id(user_data))
         route = cp.get_ride_route(source_file)
         if route["lat"]:
             # Base route line

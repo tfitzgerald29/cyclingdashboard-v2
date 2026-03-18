@@ -3,17 +3,13 @@ import os
 
 import polars as pl
 
-
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_WT_DATA_FILE = os.path.join(
-    _BASE_DIR, "weighttraining_data", "weighttraining_data.json"
-)
+from .storage import storage
 
 
 class SportSummarizer:
-    def __init__(self, mergedfiles_path, wt_data_file=None):
-        self.mergedfiles_path = mergedfiles_path
-        self.wt_data_file = wt_data_file or _DEFAULT_WT_DATA_FILE
+    def __init__(self, mergedfiles_path=None, wt_data_file=None, user_id=None):
+        self.mergedfiles_path = mergedfiles_path or storage.merged_path(user_id)
+        self.wt_data_file = wt_data_file or storage.wt_data_file(user_id)
 
     def load_session_data(self, message_type="session_mesgs") -> pl.DataFrame:
         """Load a merged parquet file, returning an empty DataFrame on failure.
@@ -23,14 +19,14 @@ class SportSummarizer:
         correctly.  Returns an empty DataFrame (never None) so callers don't
         need a None guard.
         """
-        file_path = os.path.join(self.mergedfiles_path, f"{message_type}.parquet")
+        file_path = storage.path_join(self.mergedfiles_path, f"{message_type}.parquet")
 
-        if not os.path.exists(file_path):
+        if not storage.path_exists(file_path):
             print(f"  [SportSummarizer] WARNING: {file_path} not found")
             return pl.DataFrame()
 
         try:
-            df = pl.read_parquet(file_path)
+            df = storage.read_parquet(file_path)
         except Exception as e:
             print(f"  [SportSummarizer] ERROR loading {message_type}: {e}")
             return pl.DataFrame()
@@ -418,10 +414,9 @@ class SportSummarizer:
 
         # ── Weight training JSON (exercise counts per date) ───────────────
         wt_by_date: dict[str, int] = {}
-        if os.path.exists(self.wt_data_file):
+        if storage.path_exists(self.wt_data_file):
             try:
-                with open(self.wt_data_file) as f:
-                    wt_data = json.load(f)
+                wt_data = storage.read_json(self.wt_data_file)
                 for entry in wt_data:
                     wt_by_date[entry["date"]] = len(entry.get("exercises", []))
             except Exception as e:
@@ -430,9 +425,9 @@ class SportSummarizer:
         garmin_lifting_dates: set[str] = set()
 
         # ── FIT session data ──────────────────────────────────────────────
-        parquet_path = os.path.join(self.mergedfiles_path, "session_mesgs.parquet")
-        if os.path.exists(parquet_path):
-            df = pl.read_parquet(
+        parquet_path = storage.path_join(self.mergedfiles_path, "session_mesgs.parquet")
+        if storage.path_exists(parquet_path):
+            df = storage.read_parquet(
                 parquet_path,
                 columns=["sport", "timestamp", "total_timer_time", "total_distance"],
             )
