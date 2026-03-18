@@ -10,12 +10,12 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # (lookback_years, date_column, is_string).
 # is_string=True means the column is stored as "YYYY-MM-DD" text (sleep.parquet).
 # is_string=False means the column is a Datetime/Date dtype.
-# record_mesgs is limited to 1 year — it's raw per-second telemetry and the
-# dashboard never looks back further than 12 months for ride-detail views.
+# record_mesgs is limited to 6 months — it's raw per-second telemetry and the
+# dashboard never looks back further than 6 months for ride-detail views.
 # Everything else uses 4 years to cover all aggregate charts.
 _DATE_FILTERS: dict[str, tuple[int, str, bool]] = {
     "session_mesgs.parquet": (4, "timestamp", False),
-    "record_mesgs.parquet": (1, "timestamp", False),
+    "record_mesgs.parquet": (0.5, "timestamp", False),
     "set_mesgs.parquet": (4, "timestamp", False),
     "activity_mesgs.parquet": (4, "timestamp", False),
     "split_mesgs.parquet": (4, "start_time", False),
