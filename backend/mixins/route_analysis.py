@@ -2,6 +2,7 @@ import os
 
 import polars as pl
 
+from ..schemas import load_records
 from ..storage import storage
 
 
@@ -21,11 +22,12 @@ class RouteAnalysisMixin:
         if not storage.path_exists(records_path):
             return {"distance_mi": [], "altitude_ft": [], "grade_pct": []}
 
-        records = (
-            storage.read_parquet(records_path)
-            .filter(pl.col("source_file") == source_file)
-            .sort("timestamp")
-        )
+        records = load_records(
+            "cycling",
+            records_path,
+            source_files=[source_file],
+            columns=["source_file", "timestamp", "distance", "enhanced_altitude"],
+        ).sort("timestamp")
 
         if records.is_empty():
             return {"distance_mi": [], "altitude_ft": [], "grade_pct": []}
@@ -92,11 +94,19 @@ class RouteAnalysisMixin:
         if not storage.path_exists(records_path):
             return []
 
-        records = (
-            storage.read_parquet(records_path)
-            .filter(pl.col("source_file") == source_file)
-            .sort("timestamp")
-        )
+        records = load_records(
+            "cycling",
+            records_path,
+            source_files=[source_file],
+            columns=[
+                "source_file",
+                "timestamp",
+                "distance",
+                "enhanced_altitude",
+                "power",
+                "cadence",
+            ],
+        ).sort("timestamp")
 
         if records.is_empty():
             return []
@@ -257,11 +267,19 @@ class RouteAnalysisMixin:
         if not storage.path_exists(records_path):
             return {"lat": [], "lon": [], "power": [], "elevation": []}
 
-        records = (
-            storage.read_parquet(records_path)
-            .filter(pl.col("source_file") == source_file)
-            .sort("timestamp")
-        )
+        records = load_records(
+            "cycling",
+            records_path,
+            source_files=[source_file],
+            columns=[
+                "source_file",
+                "timestamp",
+                "position_lat",
+                "position_long",
+                "enhanced_altitude",
+                "power",
+            ],
+        ).sort("timestamp")
 
         if records.is_empty() or "position_lat" not in records.columns:
             return {"lat": [], "lon": [], "power": [], "elevation": []}
