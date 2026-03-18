@@ -1,4 +1,3 @@
-boto3
 dash[cloud]
 garmin-fit-sdk
 gunicorn
@@ -7,8 +6,5 @@ pandas
 plotly
 polars
 pyarrow
-python-dotenv
-s3fs
 statsmodels
-supabase
 tzdata
