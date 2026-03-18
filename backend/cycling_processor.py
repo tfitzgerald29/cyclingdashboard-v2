@@ -1,5 +1,6 @@
 import os
 
+import gc
 import numpy as np
 import polars as pl
 
@@ -117,6 +118,8 @@ class CyclingProcessor(
 
         storage.write_parquet(new_cache, cache_path)
         print(f"  Power curve cache: added {len(rows)} rides (total: {len(new_cache)})")
+        del records, rows, new_cache, existing_cache
+        gc.collect()
 
     def _update_bootstrap_cache(self):
         """Refresh the CP covariate bootstrap cache if data has changed."""
@@ -176,6 +179,7 @@ class CyclingProcessor(
             dt = r[ts_col]
             label = f"{dt.strftime('%Y-%m-%d')} — {r['miles']} mi, {r['hours']} hr"
             rides.append({"label": label, "value": dt.isoformat()})
+        del df
         return rides
 
     def get_ride_summary(self, ride_timestamp: str) -> dict | None:
@@ -197,6 +201,7 @@ class CyclingProcessor(
             pl.col(ts_col) == pl.lit(dt).cast(pl.Datetime("us", "America/Denver"))
         )
         if ride.is_empty():
+            del df, ride
             return None
 
         r = ride.to_dicts()[0]
@@ -207,7 +212,7 @@ class CyclingProcessor(
         threshold_power = r.get("threshold_power")
         left_right_balance = r.get("left_right_balance")
 
-        return {
+        summary = {
             "date": r[ts_col].strftime("%Y-%m-%d %I:%M %p"),
             "distance_mi": round(r["total_distance"] / 1609.344, 1),
             "duration_hr": round(r["total_timer_time"] / 3600, 2),
@@ -248,6 +253,9 @@ class CyclingProcessor(
             else None,
             "source_file": r.get("source_file"),
         }
+        del df, ride
+        gc.collect()
+        return summary
 
     # ── Shared utilities ──────────────────────────────────────────────────
 
@@ -267,7 +275,7 @@ class CyclingProcessor(
         if records["power"].drop_nulls().len() == 0:
             return None
 
-        return (
+        result = (
             records.with_columns(
                 pl.col("power")
                 .fill_null((pl.col("power").shift(1) + pl.col("power").shift(2)) / 2)
@@ -276,6 +284,9 @@ class CyclingProcessor(
             .cast(pl.Int64)
             .to_list()
         )
+        del records
+        gc.collect()
+        return result
 
     @staticmethod
     def _best_avg_power(power: list[int], window: int) -> int | None:
