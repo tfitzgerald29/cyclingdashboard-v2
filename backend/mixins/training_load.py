@@ -56,7 +56,7 @@ class TrainingLoadMixin:
                 orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ),
             template="plotly_white",
-            width=1400,
+            autosize=True,
             height=700,
             annotations=[
                 {
@@ -399,7 +399,7 @@ class TrainingLoadMixin:
                 orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ),
             template="plotly_white",
-            width=1400,
+            autosize=True,
             height=700,
         )
 

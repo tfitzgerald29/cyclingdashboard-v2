@@ -233,8 +233,19 @@ def update_training_load(date_range, show_forecast):
         paper_bgcolor=COLORS["card"],
         plot_bgcolor=COLORS["card"],
         font_color=COLORS["text"],
-        xaxis=dict(gridcolor=COLORS["border"]),
-        yaxis=dict(gridcolor=COLORS["border"]),
+        xaxis=dict(gridcolor=COLORS["border"], automargin=True),
+        yaxis=dict(gridcolor=COLORS["border"], automargin=True),
+        yaxis2=dict(automargin=True),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=10),
+        ),
+        margin=dict(t=40, b=70, l=44, r=36),
+        autosize=True,
         height=550,
     )
     return fig
