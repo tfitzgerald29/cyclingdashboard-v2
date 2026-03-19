@@ -36,6 +36,8 @@ _RECORD_MESGS_KEEP_COLS = [
     "enhanced_speed",
     "cadence",
     "heart_rate",
+    "sport",
+    "sub_sport",
 ]
 
 # Numeric columns in record_mesgs that can be downcast Float64 → Float32

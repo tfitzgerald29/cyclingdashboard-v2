@@ -109,6 +109,15 @@ def skiing_tab():
                     "fontSize": "0.95rem",
                 },
             ),
+            html.H4(
+                "Last 6 Months of data",
+                style={
+                    "color": ACCENT,
+                    "marginBottom": "5px",
+                    "marginTop": "5px",
+                    "fontSize": "0.80rem",
+                },
+            ),
             dcc.Dropdown(
                 id="skiing-session-dropdown",
                 placeholder="Select a session...",

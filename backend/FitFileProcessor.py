@@ -60,6 +60,12 @@ class FitFileProcessor:
         # Replaces expected_columns.json — schemas are now the single source of truth.
         self.expected_columns = INGEST_COLUMNS
 
+    @staticmethod
+    def _parquet_filename_for_msg_type(msg_type: str) -> str:
+        if msg_type == "record_mesgs":
+            return "record_mesgs_full.parquet"
+        return f"{msg_type}.parquet"
+
     def unzip_fit_files(self):
         # Ensure the processed path exists
         storage.makedirs(self.processedpath)
@@ -110,14 +116,13 @@ class FitFileProcessor:
         print(f"Checking for already processed files in: {self.mergedfiles_path}")
 
         for msg_type in self.inclusion_list:
-            parquet_path = storage.path_join(
-                self.mergedfiles_path, f"{msg_type}.parquet"
-            )
+            parquet_name = self._parquet_filename_for_msg_type(msg_type)
+            parquet_path = storage.path_join(self.mergedfiles_path, parquet_name)
             if storage.path_exists(parquet_path):
                 try:
                     df = storage.read_parquet(parquet_path)
                     print(
-                        f"  ✓ {msg_type}.parquet loaded: {df.shape[0]} rows, {df.shape[1]} cols"
+                        f"  ✓ {parquet_name} loaded: {df.shape[0]} rows, {df.shape[1]} cols"
                     )
                     if "source_file" in df.columns:
                         files = set(df["source_file"].unique().to_list())
@@ -126,9 +131,9 @@ class FitFileProcessor:
                     else:
                         print(f"    ⚠ No 'source_file' column found")
                 except Exception as e:
-                    print(f"  ✗ {msg_type}.parquet failed to load: {e}")
+                    print(f"  ✗ {parquet_name} failed to load: {e}")
             else:
-                print(f"  ✗ {msg_type}.parquet not found (will be created)")
+                print(f"  ✗ {parquet_name} not found (will be created)")
 
         return processed_files
 
@@ -317,11 +322,10 @@ class FitFileProcessor:
         if new_file_count > 0:
             print(f"\nUpdating Parquet files in: {self.mergedfiles_path}")
             for msg_type, data in data_by_type.items():
+                parquet_name = self._parquet_filename_for_msg_type(msg_type)
                 parquet_path = storage.path_join(
                     self.mergedfiles_path,
-                    "record_mesgs_full.parquet"
-                    if msg_type == "record_mesgs"
-                    else f"{msg_type}.parquet",
+                    parquet_name,
                 )
 
                 if data:
@@ -357,7 +361,7 @@ class FitFileProcessor:
                                 combined_df = combined_df.unique(subset=dedup_cols)
                                 storage.write_parquet(combined_df, parquet_path)
                                 print(
-                                    f"✓ {msg_type}.parquet: Added {new_df.shape[0]} rows (total: {combined_df.shape[0]})"
+                                    f"✓ {parquet_name}: Added {new_df.shape[0]} rows (total: {combined_df.shape[0]})"
                                 )
                             except Exception as e:
                                 print(f"  ✗ Failed to merge {msg_type}: {e}")
@@ -380,7 +384,7 @@ class FitFileProcessor:
                             new_df = new_df.unique(subset=dedup_cols)
                             storage.write_parquet(new_df, parquet_path)
                             print(
-                                f"✓ {msg_type}.parquet: Created with {new_df.shape[0]} rows"
+                                f"✓ {parquet_name}: Created with {new_df.shape[0]} rows"
                             )
 
                     except Exception as e:
@@ -505,9 +509,8 @@ class FitFileProcessor:
         for msg_type, data in data_by_type.items():
             if not data:
                 continue
-            parquet_path = storage.path_join(
-                self.mergedfiles_path, f"{msg_type}.parquet"
-            )
+            parquet_name = self._parquet_filename_for_msg_type(msg_type)
+            parquet_path = storage.path_join(self.mergedfiles_path, parquet_name)
             try:
                 if msg_type in self.expected_columns:
                     expected = self.expected_columns[msg_type]
@@ -562,7 +565,11 @@ class FitFileProcessor:
         if "timestamp" not in keep:
             keep.append("timestamp")
 
-        df = scan.filter(pl.col("timestamp").dt.date() >= cutoff).select(keep).collect()
+        df = (
+            scan.filter((pl.col("timestamp").dt.date() >= cutoff))
+            .select(keep)
+            .collect()
+        )
 
         if df.is_empty():
             return
@@ -620,11 +627,10 @@ class FitFileProcessor:
 
         # Remove existing merged parquets
         for msg_type in self.inclusion_list:
+            parquet_name = self._parquet_filename_for_msg_type(msg_type)
             parquet_path = storage.path_join(
                 self.mergedfiles_path,
-                "record_mesgs_full.parquet"
-                if msg_type == "record_mesgs"
-                else f"{msg_type}.parquet",
+                parquet_name,
             )
             if storage.path_exists(parquet_path):
                 os.remove(parquet_path)
