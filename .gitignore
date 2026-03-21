@@ -18,7 +18,7 @@ removeoldfiles.py
 tcx_file_processor_NB.py
 tests/
 sleepexplore.py
-
+run_local.py
 # Python
 __pycache__/
 *.pyc

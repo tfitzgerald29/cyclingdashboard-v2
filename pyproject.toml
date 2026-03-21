@@ -8,6 +8,7 @@ dependencies = [
     "dash-mantine-components>=2.6.0",
     "dash[cloud]>=4.0.0",
     "garmin-fit-sdk>=21.195.0",
+    "gunicorn>=25.1.0",
     "ipykernel>=7.2.0",
     "pandas>=3.0.1",
     "plotly>=6.6.0",
